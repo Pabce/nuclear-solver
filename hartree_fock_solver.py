@@ -2,6 +2,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 from scipy.linalg import eigh
 from copy import deepcopy
+import time
 
 import minnesota_hf_system as hfs
 import harmonic_3d as h3d
@@ -17,35 +18,43 @@ class Solver:
         self.system = system
 
         self.n_states = system.n_states
+
+        # Pick the hole states as those with the lowest energies
+        self.original_energies = system.eigenenergies
         self.hole_states = np.sort(system.energy_indices[:self.n_particles])
         self.particle_states = np.sort(system.energy_indices[self.n_particles:])
 
         print("Hole states: {}".format(self.hole_states))
         print("Particle states: {}".format(self.particle_states))
-        exit()
 
     def run(self, max_iterations=100, tolerance=1e-8, mixture=0):
         # Hartee-Fock single-particle hamiltonian
         h = np.zeros((self.n_states, self.n_states))
-        # Single-particle energies
-        sp_energies = np.zeros((self.n_states, 1))
-        sp_energies_prev = np.zeros((self.n_states, 1))
-        # D matrix (transformation between original basis and HF basis, components D_alpha,q) (initial guess)
-        D = np.eye(self.n_states)
 
-        # Fisrt, get 1-body and 2-body matrix elements in the original basis
+        # Single-particle energies
+        sp_energies = np.sort(self.original_energies)
+        sp_energies_prev = np.zeros((self.n_states, 1))
+
+        # D (overlap) matrix (transformation between original basis and HF basis, components D_alpha,q) (initial guess)
+        D = np.eye(self.n_states)
+        prev_eigenvectors = np.eye(self.n_states)
+
+        # Fisrt, get 1-body and 2-body matrix elements in the original basis (only need to do this once!)
         t_matrix = self.system.get_one_body_matrix_elements()
         V_matrix = self.system.get_two_body_matrix_elements()
-        
-        for i in range(max_iterations):
-            print("Iteration", i)
 
-            # Construct the density matrix in the original basis. Remember, it is only non-zero for hole states.
+        # TODO: We want to reorder our matrices so that the hole states are first
+
+        print(sp_energies)
+        for i in range(max_iterations):
+            print("Iteration", i + 1)
+
+            # Construct the density matrix in the original basis (in the first iteration, it will be non-zero only for the hole states)
             rho = self.get_density_matrix(D)
 
             # Print rho up to 3 decimals
             np.set_printoptions(precision=3)
-            print(rho)
+            #print(rho)
             # print(t_matrix)
             # print(V_matrix)
 
@@ -54,20 +63,25 @@ class Solver:
             #print(hamiltonian)
 
             # Diagonalize the single-particle hamiltonian
-            sp_energies, eigenvectors = eigh(hamiltonian, subset_by_index=[0, self.n_particles - 1])
+            sp_energies, eigenvectors = eigh(hamiltonian, subset_by_index=[0, self.n_states - 1])
+            # Order the eigenvectors by energy (I think this is not necessary, but it's good to be sure)
+            eigenvectors = eigenvectors[:, np.argsort(sp_energies)]
 
             # Stop iterating if difference between previous energies is smaller than tolerance
             norm = np.linalg.norm(sp_energies - sp_energies_prev) / self.n_states
             if norm < tolerance:
-                print("Convergence reached after {} iterations".format(i))
+                print("Convergence reached after {} iterations".format(i + 1))
                 print("Single particle energies: {}".format(sp_energies))
                 print("NORM", norm)
-                hf_energy = self.compute_hf_energy(sp_energies, t_matrix)
+                hf_energy = self.compute_hf_energy(sp_energies, t_matrix, self.n_particles)
                 return hf_energy, sp_energies, eigenvectors
             
-            # Update the previous energies and the D matrix (using the lowest N (=number of particles) eigenvectors for the next iteration)
+            # Update the previous energies and the D matrix
             sp_energies_prev = deepcopy(sp_energies)
-            D = np.vstack(eigenvectors)
+            D = eigenvectors * (1 - mixture) + prev_eigenvectors * mixture
+            prev_eigenvectors = deepcopy(eigenvectors)
+
+            print(sp_energies)
 
 
         # If we get here, we have reached the maximum number of iterations
@@ -96,16 +110,21 @@ class Solver:
         return t_matrix + gamma
 
     @staticmethod
-    def compute_hf_energy(sp_energies, t_matrix):
-        return 0.5 * (np.trace(t_matrix) + np.sum(sp_energies))
+    def compute_hf_energy(sp_energies, t_matrix, n_particles):
+        return 0.5 * (np.trace(t_matrix[:n_particles]) + np.sum(sp_energies[:n_particles]))
 
 
 if __name__ == "__main__":
 
-    system = hfs.System(k_num=3, l_num=1, omega=1, mass=1)
-    solver = Solver(system, n_particles=2)
+    system = hfs.System(k_num=14, l_num=1, omega=3, mass=1)
+    solver = Solver(system, n_particles=8)
 
-    solver.run()
+    start_time = time.time()
+    hf_energy, sp_energies, eigenvectors = solver.run(mixture=0.0)
+    end_time = time.time()
+    print("Time elapsed: {} seconds".format(end_time - start_time))
+
+    print("Hartree-Fock energy: {} MeV".format(hf_energy))
 
     # wf = lambda r: h3d.wavefunction(r, k=1, l=0, omega=1, mass=1)
 

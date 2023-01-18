@@ -13,7 +13,7 @@ import ctypes
 from scipy import LowLevelCallable
 from numba import cfunc, jit
 from numba.types import intc, CPointer, float64, int32, int64
-from minnesota_cfuncs import potential_l0
+from minnesota_cfuncs import c_potential_l0, nb_potential_l0
 
 HBAR = 1
 
@@ -35,9 +35,10 @@ class System:
         self.omega = omega
         self.mass = 1
 
+        # List of all energies and their indices
+        self.eigenenergies, self.energy_indices = self.get_lowest_energies(self.n_states)
+
         self.wavefunctions, self.sqrt_norms = self.generate_wavefunctions()
-        # Generate a list of all the indices, ordered by energy
-        self.energy_indices = self.get_lowest_energy_states_idx(self.n_states)
 
         # The way the indices will work is idx = k + l * k_num + spin * k_num * l_num
         # (where here spin is 0 or 1)
@@ -88,6 +89,31 @@ class System:
         print(f"Time to compute integral: {t1 - t0}, Value: {radial_integral}")
 
         return radial_integral
+    
+
+    def grid_twod_radial_integral(self, V0, mu, k1, k2, k3, k4, integration_limit=10):
+        r1 = np.linspace(0.001, integration_limit, 500)
+        r2 = np.linspace(0.001, integration_limit, 500)
+
+        rect = np.diff(r1)[0] * np.diff(r2)[0]
+
+        r1, r2 = np.meshgrid(r1, r2, indexing='ij')
+
+        rfunc_1 = self.wavefunctions[k1, 0](r1)
+        rfunc_2 = self.wavefunctions[k2, 0](r2)
+        rfunc_3 = self.wavefunctions[k3, 0](r1)
+        rfunc_4 = self.wavefunctions[k4, 0](r2)
+
+        potential_l0 = - 0.5 * V0 * 1/(2 * mu) * np.reciprocal(r1 * r2) * np.exp(-mu * (r1 + r2)**2) * (-1 + np.exp(4 * mu * r1 * r2))
+
+        #t0 = time.time()
+        radial_integral = np.sum(r1**2 * r2**2 * rfunc_1 * rfunc_2 * potential_l0 * rfunc_3 * rfunc_4) * rect
+        radial_integral *= 1/ (4 * np.pi)
+        #t1 = time.time()
+        #print(f"GRID Time to compute integral: {t1 - t0}, Value: {radial_integral}")
+
+        return radial_integral
+
 
     #@jit TODO: figure out how to get this to work
     def numba_twod_radial_integral(self, V0, mu, k1, sqn1, k2, sqn2, k3, sqn3, k4, sqn4, integration_limit=10):
@@ -113,27 +139,9 @@ class System:
         wf3_val = h3d.series_wavefunction_val(r1, k3, 0, omega, mass, sqn3)
         wf4_val = h3d.series_wavefunction_val(r2, k4, 0, omega, mass, sqn4)
 
-        func_val = r1**2 * r2**2 * wf1_val * wf2_val * potential_l0(V0, mu, r1, r2) * wf3_val * wf4_val
+        func_val = r1**2 * r2**2 * wf1_val * wf2_val * c_potential_l0(V0, mu, r1, r2) * wf3_val * wf4_val
 
         return func_val
-    
-    @staticmethod
-    def tbme_integrand_python(n, args):
-        r1, r2, V0, mu, k1, sqn1, k2, sqn2, k3, sqn3, k4, sqn4, omega, mass =\
-             (args[0], args[1], args[2], args[3], args[4], args[5], args[6], args[7], args[8], args[9], args[10], args[11], args[12], args[13])
-
-        wf1_val = h3d.series_wavefunction_val(r1, k1, 0, omega, mass, sqn1)
-        wf2_val = h3d.series_wavefunction_val(r2, k2, 0, omega, mass, sqn2)
-        wf3_val = h3d.series_wavefunction_val(r1, k3, 0, omega, mass, sqn3)
-        wf4_val = h3d.series_wavefunction_val(r2, k4, 0, omega, mass, sqn4)
-
-        func_val = r1**2 * r2**2 * wf1_val * wf2_val * potential_l0(V0, mu, r1, r2) * wf3_val * wf4_val
-
-        return func_val
-
-    # Sadly for my effort this will likely be the fastest...
-    def grid_twod_radial_integral():
-        pass
 
     
     # Get the one-body matrix elements in the HO basis
@@ -173,52 +181,57 @@ class System:
         max_index = self.get_idx(self.k_num - 1, 0, 1)
 
         count = 0
-        total = self.k_num**4 * 2**4
+        total = self.k_num**4 #* 2**4
         for k1, k2, k3, k4 in product(range(self.k_num), repeat=4):
-            for s1, s2, s3, s4 in product(range(2), repeat=4):
 
-                count += 1
-                if count % 100 == 0:
-                    print("{}/{}".format(count, total))
+            count += 1
+            if count % 100 == 0:
+                print("{}/{}".format(count, total))
+
+            # Get the indices:
+            idx1, idx2, idx3, idx4 = self.get_idx(np.array([k1, k2, k3, k4]), l=0, s=0)
+
+            # We can skip if not in the "upper triangle":
+            if idx1 * max_index + idx2 < idx3 * max_index + idx4: 
+                continue
+
+            # Spin deltas:
+            # d1 = 1 if (s1 == s3 and s2 == s4) else 0
+            # d2 = 1 if (s1 == s4 and s2 == s3) else 0
+            # if d1 - d2 == 0:
+            #     continue
                 
-                # Get the indices:
-                idx1, idx2, idx3, idx4 = self.get_idx(np.array([k1, k2, k3, k4]), 0, s1)
-                # We can skip if not in the "upper triangle":
-                if idx1 * max_index + idx2 < idx3 * max_index + idx4: 
-                    continue
+            # Get the wavefunctions:
+            # w1, sqn1 = self.wavefunctions[k1, 0], self.sqrt_norms[k1, 0]
+            # w2, sqn2 = self.wavefunctions[k2, 0], self.sqrt_norms[k2, 0]
+            # w3, sqn3 = self.wavefunctions[k3, 0], self.sqrt_norms[k3, 0]
+            # w4, sqn4 = self.wavefunctions[k4, 0], self.sqrt_norms[k4, 0]
 
-                # Spin deltas:
-                d1 = 1 if (s1 == s3 and s2 == s4) else 0
-                d2 = 1 if (s1 == s4 and s2 == s3) else 0
-                if d1 - d2 == 0:
-                    continue
-                    
-                # Get the wavefunctions:
-                w1, sqn1 = self.wavefunctions[k1, 0], self.sqrt_norms[k1, 0]
-                w2, sqn2 = self.wavefunctions[k2, 0], self.sqrt_norms[k2, 0]
-                w3, sqn3 = self.wavefunctions[k3, 0], self.sqrt_norms[k3, 0]
-                w4, sqn4 = self.wavefunctions[k4, 0], self.sqrt_norms[k4, 0]
+            # # Get the integrals! (only depend on k!)
+            # # There's something fishy going on here...
+            # vr_exp = self.numba_twod_radial_integral(self.V0R, self.kappaR, k1, sqn1, k2, sqn2, k3, sqn3, k4, sqn4)
+            # vs_exp = self.numba_twod_radial_integral(-self.V0s, self.kappas, k1, sqn1, k2, sqn2, k3, sqn3, k4, sqn4)
+            vr_exp = self.grid_twod_radial_integral(self.V0R, self.kappaR, k1, k2, k3, k4)
+            vs_exp = self.grid_twod_radial_integral(-self.V0s, self.kappas, k1, k2, k3, k4)
 
-                # Get the integrals! (only depend on k!)
-                # vr_exp = self.two_dimensional_radial_integral(self.V0R, self.kappaR, w1, w2, w3, w4)
-                # vs_exp = self.two_dimensional_radial_integral(-self.V0s, self.kappas, w1, w2, w3, w4)
-                # vr_exp_a = self.two_dimensional_radial_integral(self.V0R, self.kappaR, w1, w2, w4, w3)
-                # vs_exp_a = self.two_dimensional_radial_integral(-self.V0s, self.kappas, w1, w2, w4, w3)
+            vr_exp_a = vr_exp #self.numba_twod_radial_integral(self.V0R, self.kappaR, k1, sqn1, k2, sqn2, k4, sqn4, k3, sqn3)
+            vs_exp_a = vs_exp #self.numba_twod_radial_integral(-self.V0s, self.kappas, k1, sqn1, k2, sqn2, k4, sqn4, k3, sqn3)
 
-                # There's something fishy going on here...
-                vr_exp = self.numba_twod_radial_integral(self.V0R, self.kappaR, k1, sqn1, k2, sqn2, k3, sqn3, k4, sqn4)
-                vs_exp = self.numba_twod_radial_integral(-self.V0s, self.kappas, k1, sqn1, k2, sqn2, k3, sqn3, k4, sqn4)
-                vr_exp_a = vr_exp #self.numba_twod_radial_integral(self.V0R, self.kappaR, k1, sqn1, k2, sqn2, k4, sqn4, k3, sqn3)
-                vs_exp_a = vs_exp #self.numba_twod_radial_integral(-self.V0s, self.kappas, k1, sqn1, k2, sqn2, k4, sqn4, k3, sqn3)
+            VD_exp = 0.5 * (vr_exp + vs_exp)
+            VEPr_exp = 0.5 * (vr_exp_a + vs_exp_a)
 
-                VD_exp = 0.5 * (vr_exp + vs_exp)
-                VEPr_exp = 0.5 * (vr_exp_a + vs_exp_a)
+            V_exp = VD_exp + VEPr_exp
 
-                V_exp = VD_exp + VEPr_exp
+            V_mat[idx1, idx2, idx3, idx4] = V_exp
+            # The hamiltonian is hermitian, so remember to add the conjugate:
+            V_mat[idx3, idx4, idx1, idx2] = V_exp.conjugate()
 
-                V_mat[idx1, idx2, idx3, idx4] = V_exp
-                # The hamiltonian is hermitian, so remember to add the conjugate:
-                V_mat[idx3, idx4, idx1, idx2] = V_exp.conjugate()
+            # Element is spin-independent and matrix is spin-diagonal:
+            idx1_p, idx2_p, idx3_p, idx4_p = self.get_idx(np.array([k1, k2, k3, k4]), l=0, s=1)
+            V_exp = V_mat[idx1, idx2, idx3, idx4]
+            V_mat[idx1_p, idx2_p, idx3_p, idx4_p] = V_exp
+            V_mat[idx3_p, idx4_p, idx1_p, idx2_p] = V_exp.conjugate()
+
 
         return V_mat
 
@@ -231,7 +244,7 @@ class System:
         return 0.5 * self.omega * (2 * k + l + 3/2)
 
     # Get the indices of the lowest energy states
-    def get_lowest_energy_states_idx(self, num):
+    def get_lowest_energies(self, num):
         energies = np.zeros(self.n_states)
         for k in range(self.k_num):
             for l in range(self.l_num):
@@ -240,7 +253,7 @@ class System:
                     energies[idx] = self.get_ho_energies(k, l)
 
         idx = np.argsort(energies)[:num]
-        return idx
+        return energies, idx
 
 
 

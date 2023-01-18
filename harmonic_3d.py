@@ -8,7 +8,7 @@ import small_s_solver as ss
 from scipy.special import genlaguerre, factorial2
 from scipy.integrate import quad
 from scipy.linalg import eigh
-from numba import cfunc
+from numba import cfunc, jit
 from numba.types import intc, CPointer, float64, int32, int64
 from numpy.polynomial.hermite import Hermite
 from scipy.special import genlaguerre, factorial2, binom
@@ -108,68 +108,6 @@ def series_wavefunction_val(r, k, l, omega, mass, sqrt_norm):
 
 
 
-# Calculate matrix elements (for operators dependent on r only)
-def matrix_element(r, k1, l1, m1, k2, l2, m2, operator, omega=1, mass=1, print=False):
-    # psi1_c = lambda r: np.conj(wavefunction(r, k=k1, l=l1, omega=omega, mass=mass))
-    # psi2 = lambda r: wavefunction(r, k=k2, l=l2, omega=omega, mass=mass)
-
-    # # Function to integrate (inline)
-    # func = lambda r, psi1_c, psi2, operator: psi1_c(r) * operator(r) * psi2(r)
-    # result, error = quad(func, 0.00001, 20, args=(psi1_c, psi2, operator))
-    # print(result, error)
-
-    # Due to spherical harmonics orthogonality:
-    if m1 != m2 or l1 != l2:
-        return 0
-    l = l1
-    m = m1
-
-    psi1_c = np.conj(wavefunction(r, k=k1, l=l, omega=omega, mass=mass))
-    psi2 = wavefunction(r, k=k2, l=l, omega=omega, mass=mass)
-    
-    result = np.sum(psi1_c * operator * psi2 * np.diff(r, append=0))
-
-    if print:
-        plt.figure(1)
-        plt.plot(r / FM, psi1_c)
-        plt.plot(r / FM, psi2)
-
-        plt.figure(2)
-        plt.plot(r / FM, operator)
-        plt.ylim(-60, 50)
-
-        plt.figure(3)
-        plt.plot(r / FM, psi1_c * operator * psi2)
-        plt.show()
-
-    return result
-
-
-# Pretty sure this is wrong!
-def kinetic_energy_matrix_element(r, k1, l1, m1, k2, l2, m2, particle_type, omega=1, mass=1):
-    # Due to spherical harmonics orthogonality:
-    if m1 != m2 or l1 != l2:
-        return 0
-    l = l1
-    m = m1
-
-    psi1_c = np.conj(wavefunction(r, k=k1, l=l, omega=omega, mass=mass))
-    psi2 = wavefunction(r, k=k2, l=l, omega=omega, mass=mass)
-
-    f = psi1_c
-    h = r[1] - r[0] 
-    n = f.shape[0]
-    lap = np.zeros(n)
-    lap[0] = (f[1] - 2*f[0] + f[n-1]) / h**2
-    lap[1:-1] = (f[2:] - 2*f[1:-1] + f[:-2]) / h**2
-    lap[-1] = (f[0] - 2*f[-1] + f[-2]) / h**2
-
-    red_mass = MU_P if particle_type == 'proton' else MU_N
-    result = np.sum(-lap / (2 * red_mass) * psi2 * np.diff(r, append=0))
-
-    return result
-
-
 def build(r, omega, mass, particle_type, k_num=2, l_num=2):
     # Number of "k" levels
     k_num = k_num
@@ -208,7 +146,11 @@ def build(r, omega, mass, particle_type, k_num=2, l_num=2):
     ham_matrix = pot_matrix + kin_matrix
 
     return ham_matrix
-    
+
+
+
+
+
 
 if __name__ == "__main__":
     #solver = ss.S_solver(effective_potential)

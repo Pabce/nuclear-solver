@@ -1,0 +1,18 @@
+ 1. bracket <n1p L 0 0|n1 l1 n2 l2>_L^varphi
+ n1 =           3  l1 =           2  n2 =           2  l2 =           4  L =           4
+ exact bracket  0.15256312866340882       bracket from the code  0.15256312866340879     
+ 2. Symmetry test, L=           9
+ m =           5  n =           4  n1 =           3  n2 =           2
+ mp =           4  np =           3  n1p =           3  n2p =           3
+ bracket(mp,np,n1p,n2p;m,n,n1,n2) =  -4.8183364535121488E-002
+ bracket(m,n,n1,n2;mp,np,n1p,n2p) =  -4.8183364535121391E-002
+ 3. Test of the relation sum_{i,ip,L}sum_j<j|i><j|ip> = the number of states.
+ See the comments in the text of the program and in more detail in the
+ accompanying CPC paper for further explanations.
+ nqmax =          18  nq =          14
+ sum_{i1,i2,L}sum_j<j|i1><j|i2> =   875.99999999999955       exact value (number of states)=         876
+ 4. Test of the relation sum_{i,ip,L}sum_j|<j|i>_L<j|ip>_L-delta_{i,ip}| = 0.
+ For further explanations see the comments in the text of the program
+ and, in more detail, in the accompanying CPC paper.
+ nqmax =          12
+ sum_{i1,i2,L}|sum_j<j|i1><j|i2>-delta_{i1,i2}| =   4.1450900976079214E-012

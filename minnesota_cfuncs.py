@@ -1,6 +1,6 @@
 import numpy as np
 from scipy import integrate, LowLevelCallable
-from numba import cfunc
+from numba import cfunc, jit
 from numba.types import intc, CPointer, float64, int32, int64
 from numpy.polynomial.hermite import Hermite
 from scipy.special import genlaguerre, factorial2, binom
@@ -26,7 +26,11 @@ def double_factorial(n):
 
 
 @cfunc(float64(float64, float64, float64, float64))
-def potential_l0(V0, mu, x1, x2):
+def c_potential_l0(V0, mu, x1, x2):
+    return - 0.5 * V0 / (2 * mu * x1 * x2) * np.exp(-mu * (x1 + x2)**2) * (-1 + np.exp(4 * mu * x1 * x2))
+
+@jit(nopython=True)
+def nb_potential_l0(V0, mu, x1, x2):
     return - 0.5 * V0 / (2 * mu * x1 * x2) * np.exp(-mu * (x1 + x2)**2) * (-1 + np.exp(4 * mu * x1 * x2))
 
 
