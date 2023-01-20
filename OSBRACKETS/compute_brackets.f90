@@ -57,8 +57,11 @@ program compute_brackets
                                     i = i + 1
                                     !print *, i
                                     ! Write all the indices and the BRAC value to the file
-                                    write(10, '(8(2I4))', advance="no") np, n1p, mp, n1, n2, n, m, l
-                                    write(10, *) BRAC(np, n1p, mp, n1, n2, n, m, l)
+                                    ! Write only if the value is not zero (or close to zero)
+                                    if (abs(BRAC(np, n1p, mp, n1, n2, n, m, l)) > 1.d-10) then
+                                        write(10, '(8(2I4))', advance="no") np, n1p, mp, n1, n2, n, m, l
+                                        write(10, *) BRAC(np, n1p, mp, n1, n2, n, m, l)
+                                    end if
                                 end do
                             end do
                         end do

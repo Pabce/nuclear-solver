@@ -15,6 +15,7 @@ from numba import cfunc, jit
 from numba.types import intc, CPointer, float64, int32, int64
 from minnesota_cfuncs import c_potential_l0, nb_potential_l0
 import py3nj
+import moshinsky_way as mw
 
 HBAR = 1
 
@@ -120,63 +121,7 @@ class System:
         n_states = self.n_states
         V_mat = np.zeros((n_states, n_states, n_states, n_states))
         
-        # From https://wikihost.nscl.msu.edu/TalentDFT/lib/exe/fetch.php?media=hf_truncated_v2.pdf, we can evaluate the matrix elements
-        # for the Minnesota potential in the HO basis as...
-
-        max_index = self.get_idx(self.k_num - 1, 0, 1)
-
-        count = 0
-        total = self.k_num**4 #* 2**4
-        for k1, k2, k3, k4 in product(range(self.k_num), repeat=4):
-
-            count += 1
-            if count % 100 == 0:
-                print("{}/{}".format(count, total))
-
-            # Get the indices:
-            idx1, idx2, idx3, idx4 = self.get_idx(np.array([k1, k2, k3, k4]), l=0, s=0)
-
-            # We can skip if not in the "upper triangle":
-            if idx1 * max_index + idx2 < idx3 * max_index + idx4: 
-                continue
-
-            # Spin deltas:
-            # d1 = 1 if (s1 == s3 and s2 == s4) else 0
-            # d2 = 1 if (s1 == s4 and s2 == s3) else 0
-            # if d1 - d2 == 0:
-            #     continue
-                
-            # Get the wavefunctions:
-            # w1, sqn1 = self.wavefunctions[k1, 0], self.sqrt_norms[k1, 0]
-            # w2, sqn2 = self.wavefunctions[k2, 0], self.sqrt_norms[k2, 0]
-            # w3, sqn3 = self.wavefunctions[k3, 0], self.sqrt_norms[k3, 0]
-            # w4, sqn4 = self.wavefunctions[k4, 0], self.sqrt_norms[k4, 0]
-
-            # # Get the integrals! (only depend on k!)
-            # # There's something fishy going on here...
-            # vr_exp = self.numba_twod_radial_integral(self.V0R, self.kappaR, k1, sqn1, k2, sqn2, k3, sqn3, k4, sqn4)
-            # vs_exp = self.numba_twod_radial_integral(-self.V0s, self.kappas, k1, sqn1, k2, sqn2, k3, sqn3, k4, sqn4)
-            vr_exp = self.grid_twod_radial_integral(self.V0R, self.kappaR, k1, k2, k3, k4)
-            vs_exp = self.grid_twod_radial_integral(-self.V0s, self.kappas, k1, k2, k3, k4)
-
-            vr_exp_a = vr_exp #self.numba_twod_radial_integral(self.V0R, self.kappaR, k1, sqn1, k2, sqn2, k4, sqn4, k3, sqn3)
-            vs_exp_a = vs_exp #self.numba_twod_radial_integral(-self.V0s, self.kappas, k1, sqn1, k2, sqn2, k4, sqn4, k3, sqn3)
-
-            VD_exp = 0.5 * (vr_exp + vs_exp)
-            VEPr_exp = 0.5 * (vr_exp_a + vs_exp_a)
-
-            V_exp = VD_exp + VEPr_exp
-
-            V_mat[idx1, idx2, idx3, idx4] = V_exp
-            # The hamiltonian is hermitian, so remember to add the conjugate:
-            V_mat[idx3, idx4, idx1, idx2] = V_exp.conjugate()
-
-            # Element is spin-independent and matrix is spin-diagonal:
-            idx1_p, idx2_p, idx3_p, idx4_p = self.get_idx(np.array([k1, k2, k3, k4]), l=0, s=1)
-            V_exp = V_mat[idx1, idx2, idx3, idx4]
-            V_mat[idx1_p, idx2_p, idx3_p, idx4_p] = V_exp
-            V_mat[idx3_p, idx4_p, idx1_p, idx2_p] = V_exp.conjugate()
-
+        # 
 
         return V_mat
 
