@@ -19,7 +19,12 @@ import moshinsky_way as mw
 
 HBAR = 1
 
-# Simplified neutron drop system
+# Neutron drop system
+# For purposes of computing the matrix elements, and also because
+# we are interested in chossing the lowest energy states, we will
+# work with the quantum number N = 2n + l, calling it Ne here
+# (as it represents the energy of the system)
+# I hope I don't regret this
 class System:
     # Minnesota potential parameters
     V0R = 200 # MeV
@@ -29,16 +34,29 @@ class System:
     kappat = 0.639 # fm^-2
     kappas = 0.465 # fm^-2 
 
-    def __init__(self, k_num, l_num, omega=1, mass=1) -> None:
-        self.k_num = k_num
+    def __init__(self, Ne_num, l_num, omega=1, mass=1) -> None:
+        self.Ne_num = Ne_num
         self.l_num = l_num
-        self.n_states = k_num * l_num * 2 # times 2 for the spin
+        # l num represents the maximum value of l (cannot be larger than Ne_num)
+        if l_num > Ne_num:
+            raise ValueError("l_num cannot be larger than Ne_num")
+
+        # l can go from Ne to 0 in steps of 2
+        n_states = 0
+        for Ne in range(Ne_num):
+            max_l = min(Ne, l_num)
+            if max_l % 2 == 0:
+                n_states += max_l / 2 + 1
+            else:
+                n_states += (max_l + 1) / 2
+
+        self.n_states = n_states * 2 # times 2 for the spin / j
 
         self.omega = omega
-        self.mass = 1
+        self.mass = mass
 
         # List of all energies and their indices
-        self.eigenenergies, self.energy_indices = self.get_lowest_energies(self.n_states)
+        self.eigenenergies = self.get_lowest_energies()
 
         self.wavefunctions, self.sqrt_norms = self.generate_wavefunctions()
 
@@ -47,16 +65,17 @@ class System:
     
 
     def generate_wavefunctions(self, r_limit = 15, r_steps = 2500):
-        wavefunctions = np.zeros((self.k_num, self.l_num), dtype=object)
-        sqrt_norms = np.zeros((self.k_num, self.l_num), dtype=np.float64)
-        for k in range(self.k_num):
+        wavefunctions = np.zeros((self.Ne_num, self.l_num), dtype=object)
+        sqrt_norms = np.zeros((self.Ne_num, self.l_num), dtype=np.float64)
+        for Ne in range(self.Ne_num):
             for l in range(self.l_num):
+                n = (Ne - l) / 2
 
                 r = np.linspace(0, r_limit, r_steps)
-                _, sqrt_norm = h3d.series_wavefunction(r, k=k, l=l, omega=self.omega, mass=self.mass)
+                _, sqrt_norm = h3d.series_wavefunction(r, k=n, l=l, omega=self.omega, mass=self.mass)
 
-                wavefunctions[k, l] = lambda r, k=k, l=l: h3d.wavefunction(r, k=k, l=l, omega=self.omega, mass=self.mass)
-                sqrt_norms[k, l] = sqrt_norm
+                wavefunctions[Ne, l] = lambda r, k=n, l=l: h3d.wavefunction(r, k=k, l=l, omega=self.omega, mass=self.mass)
+                sqrt_norms[Ne, l] = sqrt_norm
 
         return wavefunctions, sqrt_norms
     
@@ -94,22 +113,24 @@ class System:
     def get_one_body_matrix_elements(self):
         # As given in https://wikihost.nscl.msu.edu/TalentDFT/lib/exe/fetch.php?media=ho_spherical.pdf,
         # the one-body matrix elements for this model in the HO basis are...
+        # These elements only depend on n and l, not on the spin:
 
-        t = np.zeros((self.n_states, self.n_states)) 
+        t = np.zeros((self.Ne_num, self.l_num, self.Ne_num, self.l_num), dtype=np.float64)
 
-        for k1 in range(self.k_num):
+        # They are also diagonal in l
+        for Ne1, Ne2 in product(range(self.Ne_num), repeat=2):
             for l in range(self.l_num):
-                for s in range(0, 2):
-                    for k2 in range(self.k_num):
-                        idx1 = self.get_idx(k1, l, s)
-                        idx2 = self.get_idx(k2, l, s)
+                n1 = (Ne1 - l) / 2
+                n2 = (Ne2 - l) / 2
 
-                        if idx1 == idx2:
-                            t[idx1, idx2] = 2 * k1 + l + 3/2
-                        elif idx1 == idx2 - 1:
-                            t[idx1, idx2] = np.sqrt(k2 * (k2 + l + 1/2))
-                        elif idx1 == idx2 + 1:
-                            t[idx1, idx2] = np.sqrt(k1 * (k1 + l + 1/2))
+                if n1 == n2:
+                    val = Ne1 + 3/2
+                elif n1 == n2 - 1:
+                    val = np.sqrt(n2 * (n2 + l + 1/2))
+                elif n2 == n2 + 1:
+                    val = np.sqrt(n1 * (n1 + l + 1/2))
+        
+                t[Ne1, l, Ne2, l] = val
 
         t *= 0.5 * HBAR * self.omega
         
@@ -125,25 +146,22 @@ class System:
 
         return V_mat
 
-
-    def get_idx(self, k, l, s):
-        return k + l * self.k_num + s * self.k_num * self.l_num
-
     # Energies of the HO basis eigenstates
-    def get_ho_energies(self, k, l):
-        return 0.5 * self.omega * (2 * k + l + 3/2)
+    def get_ho_energies(self, Ne=-1, n=-1, l=-1):
+        if Ne == -1:
+            return 0.5 * self.omega * (2 * n + l + 3/2)
+        else:
+            return 0.5 * self.omega * Ne
 
     # Get the indices of the lowest energy states
     def get_lowest_energies(self, num):
-        energies = np.zeros(self.n_states)
-        for k in range(self.k_num):
+        energies = np.zeros(self.Ne_num, self.l_num)
+        for Ne in range(self.Ne_num):
             for l in range(self.l_num):
-                for s in range(2):
-                    idx = self.get_idx(k, l, s)
-                    energies[idx] = self.get_ho_energies(k, l)
+                    energies[Ne, l] = self.get_ho_energies(Ne)
 
-        idx = np.argsort(energies)[:num]
-        return energies, idx
+        #idx = np.argsort(energies)[:num]
+        return energies
 
 
 

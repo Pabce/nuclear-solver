@@ -5,30 +5,30 @@ program compute_brackets
     implicit none
     !dimension fac(0:201),dfac(0:201),defac(0:201),rfac(0:100)
     double precision, allocatable :: BRAC(:,:,:,:,:,:,:,:)
-    integer :: np, n1p, mp, n1, n2, n, m, l, NQMAX, istatus, i
+    integer :: np, n1p, mp, n1, n2, n, m, l, istatus, i
     double precision :: SI, CO
     
     ! Input parameters (absurdly read from command line, fucking nightmare)
-    integer :: ndif, LMIN, LMAX
-    character(len=25) :: filename, ndif_char, LMIN_char, LMAX_char
+    integer :: NQMAX, LMIN, LMAX
+    character(len=25) :: filename, NQMAX_char, LMIN_char, LMAX_char
     CALL get_command_argument(1, filename)
-    CALL get_command_argument(2, ndif_char)
+    CALL get_command_argument(2, NQMAX_char)
     CALL get_command_argument(3, LMIN_char)
     CALL get_command_argument(4, LMAX_char)
-    read(ndif_char, *)ndif
+    read(NQMAX_char, *)NQMAX
     read(LMIN_char, *)LMIN
     read(LMAX_char, *)LMAX
 
     ! Print the input parameters
-    print *, "ndif = ", ndif
-    print *, "LMAX = ", LMAX
+    print *, "NQMAX = ", NQMAX
     print *, "LMIN = ", LMIN
+    print *, "LMAX = ", LMAX
     
     ! L is what you call lambda
     ! NQMAX is the maximum value of the sum of the "energy" quantum numbers of the two particles: 2 * n1 + 2 * n2 + l1 + l2
     ! Max value of L is l1 + l2. Max value of NQ = 2 * n1 + 2 * n2 + L
     ! So the max value of 2 * (n1 + n2) = NQ - L == NDIF
-    NQMAX = ndif + LMAX
+    !NQMAX = ndif + LMAX
 
     ! The angular parameters are CO=COS(VARPHI) and SI=SIN(VARPHI). Set, for example (for equal masses)
     SI = 1/sqrt(2.d0)
@@ -61,6 +61,11 @@ program compute_brackets
                                     if (abs(BRAC(np, n1p, mp, n1, n2, n, m, l)) > 1.d-10) then
                                         write(10, '(8(2I4))', advance="no") np, n1p, mp, n1, n2, n, m, l
                                         write(10, *) BRAC(np, n1p, mp, n1, n2, n, m, l)
+                                        ! if (n1p > 7) then
+                                        !     print *, "n1p = ", n1p
+                                        !     print *, NQMAX
+                                        !     print *, LMIN
+                                        !end if
                                     end if
                                 end do
                             end do
