@@ -14,17 +14,17 @@ from scipy import LowLevelCallable
 from numba import cfunc, jit
 from numba.types import intc, CPointer, float64, int32, int64
 from minnesota_cfuncs import c_potential_l0, nb_potential_l0
-import py3nj
 import moshinsky_way as mw
 
 HBAR = 1
 
 # Neutron drop system
 # For purposes of computing the matrix elements, and also because
-# we are interested in chossing the lowest energy states, we will
+# we are interested in chosing the lowest energy states, we will
 # work with the quantum number N = 2n + l, calling it Ne here
 # (as it represents the energy of the system)
 # I hope I don't regret this
+# Spoiler alert: I do regret this
 class System:
     # Minnesota potential parameters
     V0R = 200 # MeV

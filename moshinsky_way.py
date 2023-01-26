@@ -219,6 +219,9 @@ def main(Ne_num, l_num, omega, mass, integration_limit, integration_steps):
     # Set the central potential matrix in ls coupling basis
     central_potential_ls_coupling_basis_matrix = set_central_potential_ls_coupling_basis_matrix(central_potential_reduced_matrix,
                                                                                                 moshinsky_brackets, Ne_num, l_num)
+
+    cpj = central_potential_J_coupling_matrix_element(central_potential_ls_coupling_basis_matrix, 1, 1, 1.5, 1, 1, 1.5, 1, 1, 1.5, 1, 1, 1.5, 4)
+    print(cpj)
     
     # Finally, get the matrix elements in the J coupling basis
 
