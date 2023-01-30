@@ -34,17 +34,17 @@ class System:
     kappat = 0.639 # fm^-2
     kappas = 0.465 # fm^-2 
 
-    def __init__(self, Ne_num, l_num, omega=1, mass=1) -> None:
-        self.Ne_num = Ne_num
-        self.l_num = l_num
-        # l num represents the maximum value of l (cannot be larger than Ne_num)
-        if l_num > Ne_num:
-            raise ValueError("l_num cannot be larger than Ne_num")
+    def __init__(self, Ne_max, l_max, omega=1, mass=1) -> None:
+        self.Ne_max = Ne_max
+        self.l_max = l_max
+        # l num represents the maximum value of l (cannot be larger than Ne_max)
+        if l_max > Ne_max:
+            raise ValueError("l_max cannot be larger than Ne_max")
 
         # l can go from Ne to 0 in steps of 2
         n_states = 0
-        for Ne in range(Ne_num):
-            max_l = min(Ne, l_num)
+        for Ne in range(Ne_max):
+            max_l = min(Ne, l_max)
             if max_l % 2 == 0:
                 n_states += max_l / 2 + 1
             else:
@@ -60,15 +60,15 @@ class System:
 
         self.wavefunctions, self.sqrt_norms = self.generate_wavefunctions()
 
-        # The way the indices will work is idx = k + l * k_num + spin * k_num * l_num
+        # The way the indices will work is idx = k + l * k_num + spin * k_num * l_max
         # (where here spin is 0 or 1)
     
 
     def generate_wavefunctions(self, r_limit = 15, r_steps = 2500):
-        wavefunctions = np.zeros((self.Ne_num, self.l_num), dtype=object)
-        sqrt_norms = np.zeros((self.Ne_num, self.l_num), dtype=np.float64)
-        for Ne in range(self.Ne_num):
-            for l in range(self.l_num):
+        wavefunctions = np.zeros((self.Ne_max, self.l_max), dtype=object)
+        sqrt_norms = np.zeros((self.Ne_max, self.l_max), dtype=np.float64)
+        for Ne in range(self.Ne_max):
+            for l in range(self.l_max):
                 n = (Ne - l) / 2
 
                 r = np.linspace(0, r_limit, r_steps)
@@ -115,11 +115,11 @@ class System:
         # the one-body matrix elements for this model in the HO basis are...
         # These elements only depend on n and l, not on the spin:
 
-        t = np.zeros((self.Ne_num, self.l_num, self.Ne_num, self.l_num), dtype=np.float64)
+        t = np.zeros((self.Ne_max, self.l_max, self.Ne_max, self.l_max), dtype=np.float64)
 
         # They are also diagonal in l
-        for Ne1, Ne2 in product(range(self.Ne_num), repeat=2):
-            for l in range(self.l_num):
+        for Ne1, Ne2 in product(range(self.Ne_max), repeat=2):
+            for l in range(self.l_max):
                 n1 = (Ne1 - l) / 2
                 n2 = (Ne2 - l) / 2
 
@@ -155,9 +155,9 @@ class System:
 
     # Get the indices of the lowest energy states
     def get_lowest_energies(self, num):
-        energies = np.zeros(self.Ne_num, self.l_num)
-        for Ne in range(self.Ne_num):
-            for l in range(self.l_num):
+        energies = np.zeros(self.Ne_max, self.l_max)
+        for Ne in range(self.Ne_max):
+            for l in range(self.l_max):
                     energies[Ne, l] = self.get_ho_energies(Ne)
 
         #idx = np.argsort(energies)[:num]
