@@ -164,6 +164,8 @@ class System:
                             t[idx1, idx2] = np.sqrt(k2 * (k2 + l + 1/2))
                         elif idx1 == idx2 + 1:
                             t[idx1, idx2] = np.sqrt(k1 * (k1 + l + 1/2))
+                        else:
+                            t[idx1, idx2] = 0
 
         t *= 0.5 * HBAR * self.omega
         
@@ -231,7 +233,6 @@ class System:
             V_exp = V_mat[idx1, idx2, idx3, idx4]
             V_mat[idx1_p, idx2_p, idx3_p, idx4_p] = V_exp
             V_mat[idx3_p, idx4_p, idx1_p, idx2_p] = V_exp.conjugate()
-
 
         return V_mat
 

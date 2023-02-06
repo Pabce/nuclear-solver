@@ -42,11 +42,11 @@ def recast_indices(mode, Nq_max, Bprime, n1prime, Aprime, n1, n2, B, A, lamb):
 
 def get_moshinsky_arrays():
     # Prepare the field
-    lamb_max = 10
+    lamb_max = 16
     lamb_min = 0
     #nqdif = 2
-    Nq_max_even = 10
-    Nq_max_odd = 11
+    Nq_max_even = 20
+    Nq_max_odd = 21
     Nq_max = max(Nq_max_even, Nq_max_odd)
 
     sz = (Nq_max - lamb_min)//2 + 1
@@ -55,6 +55,10 @@ def get_moshinsky_arrays():
     # Open the file and load the Fortran computed values
     values_and_indices_f_even = np.loadtxt('OSBRACKETS/out_even.dat')
     values_and_indices_f_odd = np.loadtxt('OSBRACKETS/out_odd.dat')
+    values_f_even = values_and_indices_f_even[:, -1]
+    values_f_odd = values_and_indices_f_odd[:, -1]
+    indices_f_even = values_and_indices_f_even[:, :-1].astype(int)
+    indices_f_odd = values_and_indices_f_odd[:, :-1].astype(int)
     values_f = np.hstack((values_and_indices_f_even[:, -1], values_and_indices_f_odd[:, -1]))
     indices_f = np.vstack((values_and_indices_f_even[:, :-1].astype(int), values_and_indices_f_odd[:, :-1].astype(int)))
 
@@ -72,9 +76,11 @@ def get_moshinsky_arrays():
     brackets = np.zeros((n_max + 1, l_max - l_min + 1, n_max + 1, l_max - l_min + 1, n_max + 1, 
                                     l_max - l_min + 1, l_max - l_min + 1, lamb_max - lamb_min + 1))
     # Recast the indices (incredibly works)
-    indices = np.vstack(recast_indices('n', Nq_max, *[indices_f[:, i] for i in range(8)])).T
+    indices_even = np.vstack(recast_indices('n', Nq_max_even, *[indices_f_even[:, i] for i in range(8)])).T
+    indices_odd = np.vstack(recast_indices('n', Nq_max_odd, *[indices_f_odd[:, i] for i in range(8)])).T
     # Index the matrix
-    brackets[tuple(indices.T)] = values_f
+    brackets[tuple(indices_even.T)] = values_f_even
+    brackets[tuple(indices_odd.T)] = values_f_odd
 
     # Some tests
     # print(indices_f[12])
