@@ -17,8 +17,8 @@ from scipy.special import genlaguerre, factorial2, binom
 from shell import potential as shellpot
 from shell import WS_PARAMETERS, FM, S, P_MASS, N_MASS, AMU, V0
 
-# hbar = 1
-# omega = 1
+HBAR = 197.3269788 # MeV * fm
+#HBAR = 1
 
 # Define the potential
 def effective_potential(r, l, omega, mass):
@@ -36,12 +36,14 @@ def energy(k=-1, n=-1, l=0, omega=1):
 
 # Return the radial wavefunctions
 # This must take the input IN FERMIS
-def wavefunction(r, k=-1, n=-1, l=0, omega=1, mass=1):
+def wavefunction(r, k=-1, n=-1, l=0, hbar_omega=1, mass=1):
     if k < 0:
         k = int((n - l)/2)
 
     a_kl = np.sqrt(2**(k + l + 2) * np.math.factorial(k) / (factorial2(2*k + 2*l + 1) * np.pi**0.5))
-    b = np.sqrt(1/(mass * omega))
+
+    # b = np.sqrt(hbar/(mass * omega)) # This is in fm -> hbar/omega = HBAR**2 / hbar_omega
+    b = np.sqrt(HBAR**2/(hbar_omega * mass))
     squiggle = r / b
     laguerre = genlaguerre(n=k, alpha=l+0.5)
 
@@ -53,8 +55,8 @@ def wavefunction(r, k=-1, n=-1, l=0, omega=1, mass=1):
     return r_kl
 
 # Wavefunction expressed as a power series, avoids all sorts of weird functions and is accurate a.f.
-def series_wavefunction(r, k, l, omega, mass):
-    b = np.sqrt(1/(mass * omega))
+def series_wavefunction(r, k, l, hbar_omega, mass):
+    b = np.sqrt(HBAR**2/(hbar_omega * mass))
     squiggle = r / b
 
     wf = np.zeros(r.shape)
@@ -80,31 +82,31 @@ def series_wavefunction(r, k, l, omega, mass):
     return wf, np.sqrt(norm)
 
 # As this will be called for an indiviual value of r, we have to precompute the normalization
-@cfunc(float64(float64, float64, float64, float64, float64, float64))
-def series_wavefunction_val(r, k, l, omega, mass, sqrt_norm):
-    b = np.sqrt(1/(mass * omega))
-    squiggle = r / b
+# @cfunc(float64(float64, float64, float64, float64, float64, float64))
+# def series_wavefunction_val(r, k, l, omega, mass, sqrt_norm):
+#     b = np.sqrt(1/(mass * omega))
+#     squiggle = r / b
 
-    wf = 0
-    a_0 = 1
-    a_prev = a_0
+#     wf = 0
+#     a_0 = 1
+#     a_prev = a_0
 
-    for i in range(0, 30):
-        if i == 0:
-            a = a_0
-        else:
-            a = a_prev * ((i-1) - k) / (((i-1) + 1) * (l + (i-1) + 3/2))
+#     for i in range(0, 30):
+#         if i == 0:
+#             a = a_0
+#         else:
+#             a = a_prev * ((i-1) - k) / (((i-1) + 1) * (l + (i-1) + 3/2))
 
-        wf += a * squiggle ** (l + 2 * i)
+#         wf += a * squiggle ** (l + 2 * i)
 
-        a_prev = a
+#         a_prev = a
     
-    wf = wf * np.exp(-squiggle**2 / 2)
+#     wf = wf * np.exp(-squiggle**2 / 2)
 
-    # Normalize the wavefunction
-    wf /= sqrt_norm
+#     # Normalize the wavefunction
+#     wf /= sqrt_norm
     
-    return wf
+#     return wf
 
 
 

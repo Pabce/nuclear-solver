@@ -3,7 +3,7 @@ import matplotlib.pyplot as plt
 from scipy.linalg import eigh
 from copy import deepcopy
 import time
-np.set_printoptions(precision=3)
+np.set_printoptions(precision=2)
 
 import full_minnesota_hf_system as hfs
 import harmonic_3d as h3d
@@ -48,12 +48,40 @@ class Solver:
         t_matrix = self.system.matrix_ndflatten(self.system.get_one_body_matrix_elements(), dim=2)
         V_matrix = self.system.matrix_ndflatten(self.system.get_two_body_matrix_elements(), dim=4)
 
+        print(V_matrix[0,1,:,:])
+
         # TESTS:
-        print(t_matrix)
         # Is t_matrix hermitian?
         print("T hermitian:", np.allclose(t_matrix, t_matrix.conj().T))
-        # Is V_matrix hermitian?
-        #print("V hermitian:", np.allclose(V_matrix, V_matrix.conj().T))
+
+        # Is V_matrix symmetric under swaping (1,2)<->(3,4)?
+        all_V_sym = True
+        for n1 in range(self.num_states):
+            for n2 in range(self.num_states):
+                herm = np.allclose(V_matrix[n1,n2,:,:], V_matrix[:,:,n1,n2], atol=1e-8)
+
+                if not herm:
+                    print("NOT SYMMETRIC UNDER (1,2)<->(3,4)! n1, n2:", n1, n2)
+                    print(V_matrix[n1,n2,:,:] - V_matrix[:,:,n1,n2])
+                    #print(V_matrix[:,:,n1,n2])
+                    all_V_sym = False
+
+        print("V symmetric under (1,2)<->(3,4):", all_V_sym)
+
+        # Is V_matrix antisymmetric in the last two indices?
+        all_V_antisym = True
+        for n1 in range(self.num_states):
+            for n2 in range(self.num_states):
+                antisym = np.allclose(V_matrix[n1,n2,:,:], -V_matrix[n1,n2,:,:].T, atol=1e-8)
+
+                if not antisym:
+                    print("NOT ASYM! n1, n2:", n1, n2)
+                    #print(V_matrix[n1,n2,:,:] + V_matrix[n1,n2,:,:].T)
+                    # print(V_matrix[n1,n2,:,:] - V_matrix[n1,n2,:,:].T)
+                    # print(V_matrix[n1,n2,:,:].T)
+                    all_V_antisym = False
+        
+        print("V antisymmetric in the exchange of last two indices:", all_V_antisym)
 
         # TODO: We want to reorder our matrices so that the hole states are first (maybe we don't actually need this)
 
@@ -73,19 +101,22 @@ class Solver:
             # TESTS:
             # Is rho equal to its sqaure?
             print("RHO equal to RHO^2:", np.allclose(rho, np.dot(rho, rho)))
+            # Is rho hermitian?
+            print("RHO hermitian:", np.allclose(rho, rho.conj().T))
+            # Is rho diagonal in m? (should it be???) (In any case, fix this for l!=0)
+            print("RHO diagonal in m:", np.allclose(rho[0::2, 1::2], 0, atol=1e-10))
             # Is D unitary?
             print("D unitary:", np.allclose(np.dot(D, D.conj().T), np.eye(self.num_states)))
             # Is the hamiltonian hermitian?
             print("H hermitian:", np.allclose(hamiltonian, hamiltonian.conj().T))
 
             # Print...
-            print(rho)
-            # print(t_matrix)
-            # print(V_matrix)
+            # print("HAMILTONIAN")
+            # print(np.matrix(hamiltonian))
 
 
             # Diagonalize the single-particle hamiltonian
-            sp_energies, eigenvectors = eigh(hamiltonian, subset_by_index=[0, self.num_states - 1])
+            sp_energies, eigenvectors = eigh(hamiltonian)
             # Order the eigenvectors by energy (I think this is not necessary, but it's good to be sure)
             eigenvectors = eigenvectors[:, np.argsort(sp_energies)]
 
@@ -129,6 +160,13 @@ class Solver:
         # Gamma is a contraction over mu, sigma of: V_alpha,sigma,beta,mu * rho_mu,sigma
         gamma = np.einsum('abcd,bd->ac', V_matrix, rho)
 
+        # Are t and gamma hermitian?
+        print("Gamma hermitian:", np.allclose(gamma, gamma.conj().T))
+        # print("GAMMA")
+        # print(gamma)
+
+        #print(V_matrix[0,0,:,:])
+
         return t_matrix + gamma
 
     @staticmethod
@@ -139,7 +177,7 @@ class Solver:
 
 if __name__ == "__main__":
 
-    system = hfs.System(Ne_max=8, l_max=0, omega=3, mass=1)
+    system = hfs.System(Ne_max=8, l_max=0, hbar_omega=3, mass=939)
     solver = Solver(system, num_particles=8)
 
     print("Number of states:", system.num_states)
@@ -158,7 +196,7 @@ if __name__ == "__main__":
 
     print(system.num_states)
 
-    # wf = lambda r: h3d.wavefunction(r, k=1, l=0, omega=1, mass=1)
+    # wf = lambda r: h3d.wavefunction(r, k=1, l=0, hbar_omega=1, mass=1)
 
     # r = np.linspace(0, 10, 1000)
 

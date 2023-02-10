@@ -261,7 +261,7 @@ class Solver:
 
 if __name__ == "__main__":
 
-    system = hfs.System(Ne_max=8, l_max=0, omega=3, mass=1)
+    system = hfs.System(Ne_max=8, l_max=0, hbar_omega=3, mass=1)
     solver = Solver(system, num_particles=8)
 
     start_time = time.time()
@@ -278,7 +278,7 @@ if __name__ == "__main__":
 
     print(system.num_states)
 
-    # wf = lambda r: h3d.wavefunction(r, k=1, l=0, omega=1, mass=1)
+    # wf = lambda r: h3d.wavefunction(r, k=1, l=0, hbar_omega=1, mass=1)
 
     # r = np.linspace(0, 10, 1000)
 

@@ -4,7 +4,7 @@ import time
 import harmonic_3d as h3d
 import convert_fortran
 from sympy.physics.wigner import wigner_9j
-import ctypes
+from itertools import product
 
 # Load the shared library (Wigner j symbol)
 # lib = ctypes.cdll.LoadLibrary('./wigner.so')
@@ -16,13 +16,6 @@ import ctypes
 # ninej.restype = ctypes.c_double
 
 
-
-#@cfunc(float64(int64, int64, int64, int64, int64, int64, int64, int64, int64))
-@njit(float64(int64, int64, int64, int64, int64, int64, int64, int64, int64))
-def get_moshinsky_bracket(n1, l1, n2, l2, n, l, N, L, lamb):
-    return 1.0
-
-
 # This is Minnesota specific, but will live here for now
 @njit(float64(float64[:,:,:], float64, float64, int64, int64, int64, int64, float64, int64), fastmath=True)
 def central_potential_reduced_matrix_element(wavefunctions, V0, mu, n1, l1, n2, l2, integration_limit, integration_steps):
@@ -32,40 +25,57 @@ def central_potential_reduced_matrix_element(wavefunctions, V0, mu, n1, l1, n2, 
     rfunc_1 = wavefunctions[n1, l1, :]
     rfunc_2 = wavefunctions[n2, l2, :]
 
+    # If rfunc is full of zeros, complain (stupid numba does not support string formatting)
+    if np.all(rfunc_1 == 0):
+        print("rfunc1 is all zeros. n1, l1:", n1, l1)
+    if np.all(rfunc_2 == 0):
+        print("rfunc2 is all zeros. n2, l2:", n2, l2)
+
     pot = V0 * np.exp(-mu * r**2)
 
-    #return np.trapz(rfunc_1 * pot * rfunc_2, r)
-    return np.sum(r**2 * rfunc_1 * pot * rfunc_2) * (r[1] - r[0]) # This is faster than trapz (maybe, try again with the real wavefunctions)
+    return np.trapz(r**2 * rfunc_1 * pot * rfunc_2, r)
+    integral = np.sum(r**2 * rfunc_1 * pot * rfunc_2) * (r[1] - r[0])  # This is faster than trapz (maybe, try again with the real wavefunctions)
+
+    # if n1 == 0 and n2 == 0:
+    #     print("integral", integral, l1, l2)
+
+    return integral
 
 
 #@njit(float64(float64[:,:,:,:], float64[:,:,:,:,:,:,:,:], int64, int64, int64, int64, int64, int64, int64, int64, int64), parallel=True)
 def central_potential_ls_coupling_basis_matrix_element(cp_red_matrix, moshinsky_brackets,
                                                          n1, l1, n2, l2, n3, l3, n4, l4, lamb):
+    # Check lambda is allowed
+    if lamb < np.abs(l1 - l2) or lamb > l1 + l2:
+        return 0
+    if lamb < np.abs(l3 - l4) or lamb > l3 + l4:
+        return 0
 
     Nq_12 = 2 * n1 + l1 + 2 * n2 + l2
-    Nq_34 = 2 * n3 + l3 + 2 * n4 + l4
-    Nq_lim = max(Nq_12, Nq_34) # THIS IS NOT Nq_max!!! (the parameter in the function that calls this one, to fill the matrix)
+    Nq_34 = 2 * n3 + l3 + 2 * n4 + l4 # (I think we just have to consider Nq_12...)
+    Nq_lim = Nq_12 # max(Nq_12, Nq_34) # THIS IS NOT Nq_max!!! (the parameter in the function that calls this one, to fill the matrix)
 
+    # TODO: fix the l limits (they can actually reach Nq_lim)
     mat_el = 0
     for small_n in prange(Nq_lim // 2 + 1):
-        for small_l in prange(Nq_lim // 2 - 2*small_n + 1):
-            for big_N in prange(Nq_lim // 2 - 2*small_n - small_l + 1):
-                for big_L in prange(Nq_lim // 2 - 2*small_n - small_l - 2*big_N + 1):
+        for small_l in prange(Nq_lim - 2*small_n + 1):
+            for big_N in prange(Nq_lim - 2*small_n - small_l + 1):
+                for big_L in prange(Nq_lim - 2*small_n - small_l - 2*big_N + 1):
                     
-                    # THIS GETS BIG!!!!
                     small_n_prime = int(small_n + n3 - n1 + n4 - n2 + 0.5 * (l3 + l4 - l1 - l2))
+                    # n' cannot be negative (i.e., if it comes out negative the energy conservation conditions cannot be satisfied)
+                    if small_n_prime < 0:
+                        continue
 
                     # Conditions for Moshinsky bracket to be non-zero 
                     # Also guarantees conservation of parity: (-1)^(l1+l2) = (-1)^(l+L)
-                    if (2 * n1 + l1 + 2 * n2 + l2) != 2 * small_l + small_l + 2 * big_N + big_L:
+                    if (2 * n1 + l1 + 2 * n2 + l2) != 2 * small_n + small_l + 2 * big_N + big_L:
                         continue
                     if (2 * n3 + l3 + 2 * n4 + l4) != 2 * small_n_prime + small_l + 2 * big_N + big_L:
                         continue
-                
-                    if lamb < np.abs(l1 - l2) or lamb > l1 + l2:
-                        continue
-                    if lamb < np.abs(l3 - l4) or lamb > l3 + l4:
-                        continue
+                    
+                    # print(n1, n2, n3, n4)
+                    # print(small_n, small_l, big_N, big_L)
 
                     # TESTS
                     # m = moshinsky_brackets[small_n_prime, small_l, big_N, big_L, n3, l3, l4, lamb]
@@ -74,11 +84,9 @@ def central_potential_ls_coupling_basis_matrix_element(cp_red_matrix, moshinsky_
                     # wh = np.nonzero(moshinsky_brackets[:,:,:,:,:,0,0,0])
                     # print([wh[i][0] for i in range(3)])
 
-                            
                     # n1, l1, n2, l2, n1', l1', l2', lamb   (  n2' = (2*n1 + l1 + 2*n2 + l2 - 2*n1' - l1' - l2')/2  )
                     coeff = moshinsky_brackets[small_n, small_l, big_N, big_L, n1, l1, l2, lamb]\
                             * moshinsky_brackets[small_n_prime, small_l, big_N, big_L, n3, l3, l4, lamb]
-
 
                     central_potential_el = cp_red_matrix[small_n, small_l, small_n_prime, small_l]
 
@@ -89,12 +97,6 @@ def central_potential_ls_coupling_basis_matrix_element(cp_red_matrix, moshinsky_
 #@njit(float64(float64[:,:,:,:,:,:,:,:,:], int64, int64, int64, int64, int64, int64, int64, int64, int64, int64, int64, int64, int64), fastmath=True)
 def central_potential_J_coupling_matrix_element(cp_ls_matrix, n1, l1, twoj1, n2, l2, twoj2, n3, l3, twoj3, n4, l4, twoj4, J):
 
-    # THIS IS WRONG!
-    # twos1 = twoj1 - 2*l1
-    # twos2 = twoj2 - 2*l2
-    # twos3 = twoj3 - 2*l3
-    # twos4 = twoj4 - 2*l4
-
     twos1, twos2, twos3, twos4 = 1, 1, 1, 1
 
     mat_el = 0
@@ -103,13 +105,10 @@ def central_potential_J_coupling_matrix_element(cp_ls_matrix, n1, l1, twoj1, n2,
             for twoS_prime in prange(0, 3, 2):
                 ls_el = cp_ls_matrix[n1, l1, n2, l2, n3, l3, n4, l4, lamb]
 
-                #wigner_one = ninej(2*l1, twos1, twoj1, 2*l2, twos2, twoj2, 2*lamb, twoS, 2*J)
-                #wigner_two = ninej(2*l3, twos3, twoj3, 2*l4, twos4, twoj4, 2*lamb, twoS_prime, 2*J)
-
                 # Sympy
                 try:
-                    wigner_one = wigner_9j(l1, twos1/2, twoj1/2, l2, twos2/2, twoj2/2, lamb, twoS/2, J, prec=10)
-                    wigner_two = wigner_9j(l3, twos3/2, twoj3/2, l4, twos4/2, twoj4/2, lamb, twoS_prime/2, J, prec=10)
+                    wigner_one = wigner_9j(l1, twos1/2, twoj1/2, l2, twos2/2, twoj2/2, lamb, twoS/2, J, prec=64)
+                    wigner_two = wigner_9j(l3, twos3/2, twoj3/2, l4, twos4/2, twoj4/2, lamb, twoS_prime/2, J, prec=64)
                 except ValueError:
                     continue
 
@@ -131,15 +130,15 @@ def central_potential_J_coupling_matrix_element(cp_ls_matrix, n1, l1, twoj1, n2,
 # work for any l1, l2, l3, l4.
 
 
-def set_wavefunctions(Ne_max, l_max, omega, mass, integration_limit, integration_steps):
+def set_wavefunctions(Ne_max, l_max, hbar_omega, mass, integration_limit, integration_steps):
 
     # Set the radial wavefunctions
     wavefunctions = np.zeros((Ne_max * 2 + 1, Ne_max * 2 + 1, integration_steps), dtype=np.float64)
     r = np.linspace(0, integration_limit, integration_steps)
-    for n in range(Ne_max * 2):
-        for l in range(0, Ne_max - 2*n):
+    for n in range(Ne_max * 2 + 1):
+        for l in range(0, Ne_max * 2 + 1):
 
-            wavefunctions[n, l, :] = h3d.wavefunction(r, k=n, l=l, omega=omega, mass=mass)
+            wavefunctions[n, l, :] = h3d.wavefunction(r, k=n, l=l, hbar_omega=hbar_omega, mass=mass)
 
     return wavefunctions
 
@@ -154,10 +153,10 @@ def set_moshinsky_brackets(Ne_max, l_max):
     #print(full_brackets.shape)
     # The need for these large maxima comes from the calculation of the ls basis elements (this may be wrong)
     # You can probably go way smaller if you check the limits better
-    ni_max = Ne_max // 2 + Ne_max
-    l_max = Ne_max 
+    ni_max = Ne_max
+    li_max = 2 * Ne_max 
 
-    moshinsky_brackets = full_brackets[0:ni_max+1, 0:l_max+1, 0:ni_max+1, 0:l_max+1, 0:ni_max+1, 0:l_max+1, 0:l_max+1, 0:2*l_max+1]
+    moshinsky_brackets = full_brackets[0:ni_max+1, 0:li_max+1, 0:ni_max+1, 0:li_max+1, 0:ni_max+1, 0:li_max+1, 0:li_max+1, 0:2*li_max+1]
 
     return moshinsky_brackets
 
@@ -169,11 +168,11 @@ def set_central_potential_reduced_matrix(wavefunctions, V0, mu, Ne_max, l_max, i
     Nq_lim = 2 * Ne_max # THIS IS NOT Nq_max!!! (the parameter in the function that calls this one, to fill the matrix)
 
     # These limits are overkill, but it's fine for now, this does not take much computing time
-    central_potential_reduced_matrix = np.zeros((Nq_lim // 2 + 1, Nq_lim // 2 + 1, Nq_lim // 2 + 1, Nq_lim // 2 + 1), dtype=np.float64) 
+    central_potential_reduced_matrix = np.zeros((Nq_lim // 2 + 1, Nq_lim + 1, Nq_lim // 2 + 1, Nq_lim + 1), dtype=np.float64) 
 
     mat_el = 0
     for small_n in prange(Nq_lim // 2 + 1):
-        for small_l in prange(Nq_lim // 2 - small_n + 1):
+        for small_l in prange(Nq_lim - 2 * small_n + 1):
             for small_n_prime in prange(Nq_lim // 2 + 1):
             
                 central_potential_reduced_matrix[small_n, small_l, small_n_prime, small_l] =\
@@ -212,7 +211,6 @@ def set_central_potential_ls_coupling_basis_matrix(cp_red_matrix, moshinsky_brac
     return central_potential_ls_coupling_basis_matrix
 
 
-# TODO: reduce matrix size by making twoj-indices only take values 0, 1
 #@njit(float64[:,:,:,:,:,:,:,:,:,:,:,:,:](float64[:,:,:,:,:,:,:,:,:], int64, int64), parallel=True, fastmath=True)
 def set_central_potential_J_coupling_basis_matrix(cp_ls_coupling_matrix, Ne_max, l_max):
     ni_max = Ne_max // 2
@@ -240,7 +238,7 @@ def set_central_potential_J_coupling_basis_matrix(cp_ls_coupling_matrix, Ne_max,
     
     return central_potential_J_coupling_basis_matrix
 
-
+# TODO: include the "spin deltas" What??
 @njit(float64[:,:,:,:,:,:,:,:,:,:,:,:](float64[:,:,:,:,:,:,:,:,:,:,:,:,:], int64, int64), parallel=True, fastmath=True)
 def set_central_potential_matrix(cp_J_coupling_matrix, Ne_max, l_max):
     ni_max = Ne_max // 2
@@ -269,10 +267,10 @@ def set_central_potential_matrix(cp_J_coupling_matrix, Ne_max, l_max):
 
 # This is horrible python code, I'm just trying to make it work with numba.
 # God, please forgive me.
-def main(Ne_max, l_max, omega, mass, integration_limit, integration_steps):
+def main(Ne_max, l_max, hbar_omega, mass, integration_limit, integration_steps):
 
     # Set the radial wavefunctions
-    wfs = set_wavefunctions(Ne_max, l_max, omega, mass, integration_limit, integration_steps)
+    wfs = set_wavefunctions(Ne_max, l_max, hbar_omega, mass, integration_limit, integration_steps)
 
     # Set the Moshinsky brackets, reading from file
     start = time.time()
@@ -290,6 +288,18 @@ def main(Ne_max, l_max, omega, mass, integration_limit, integration_steps):
     central_potential_ls_coupling_basis_matrix = set_central_potential_ls_coupling_basis_matrix(central_potential_reduced_matrix,
                                                                                                 moshinsky_brackets, Ne_max, l_max)
     print("Time to set ls coupling basis matrix:", time.time() - start)
+
+    n1, n2, n3, n4 = 0, 0, 0, 0
+    for n1, n2, n3, n4 in product(range(0, Ne_max // 2 + 1), repeat=4):
+
+        el1 = central_potential_ls_coupling_basis_matrix_element(central_potential_reduced_matrix, moshinsky_brackets,
+                                                                        n1, 0, n2, 0, n3, 0, n4, 0, 0)
+        el2 = central_potential_ls_coupling_basis_matrix_element(central_potential_reduced_matrix, moshinsky_brackets,
+                                                                        n3, 0, n4, 0, n1, 0, n2, 0, 0)
+
+        if not np.isclose(el1, el2):
+            print("Error in ls coupling basis matrix element:", n1, n2, n3, n4)
+            print(el1, el2)
 
     # Set the central potential matrix in J coupling basis
     start = time.time()
@@ -312,11 +322,11 @@ def main(Ne_max, l_max, omega, mass, integration_limit, integration_steps):
 if __name__ == '__main__':
     # Call the function
     
-    main(Ne_max=3, l_max=2, omega=3, mass=1, integration_limit=10, integration_steps=1000)
+    main(Ne_max=8, l_max=0, hbar_omega=3, mass=939, integration_limit=15, integration_steps=2000)
 
     print("------------------")
 
-    main(Ne_max=3, l_max=2, omega=3, mass=1, integration_limit=10, integration_steps=1000)
+    #main(Ne_max=3, l_max=2, hbar_omega=3, mass=1, integration_limit=10, integration_steps=1000)
 
     # wfs = WAVEFUNCTIONS
 

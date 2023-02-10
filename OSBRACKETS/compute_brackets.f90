@@ -1,4 +1,4 @@
-! Pablo Barham Jan 2023
+! Pablo Barham. Jan 2023.
 ! I hate this stupid language
 
 program compute_brackets
@@ -55,9 +55,18 @@ program compute_brackets
                             do n1p = 0, (NQMAX-LMIN)/2
                                 do mp = 0, (NQMAX-LMIN)/2
                                     i = i + 1
+                                    
+                                    ! da
+
                                     !print *, i
                                     ! Write all the indices and the BRAC value to the file
                                     ! Write only if the value is not zero (or close to zero)
+                                    if (np == 2 .and. n1p == 5 .and. mp == 0 .and. n1 == 2 .and. &
+                                        n2 == 2 .and. n == 1 .and. m == 1 .and. l == 2) then
+                                        print *, np, n1p, mp, n1, n2, n, m, l
+                                        print *, BRAC(np, n1p, mp, n1, n2, n, m, l)
+                                    end if
+
                                     if (abs(BRAC(np, n1p, mp, n1, n2, n, m, l)) > 1.d-10) then
                                         write(10, '(8(2I4))', advance="no") np, n1p, mp, n1, n2, n, m, l
                                         write(10, *) BRAC(np, n1p, mp, n1, n2, n, m, l)

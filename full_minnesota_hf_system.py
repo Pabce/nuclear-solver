@@ -17,7 +17,8 @@ from minnesota_cfuncs import c_potential_l0, nb_potential_l0
 import moshinsky_way as mw
 from itertools import product
 
-HBAR = 1
+HBAR = 197.3269788 # MeV * fm
+#HBAR = 1
 
 # Neutron drop system
 # For purposes of computing the matrix elements, and also because
@@ -35,7 +36,7 @@ class System:
     kappat = 0.639 # fm^-2
     kappas = 0.465 # fm^-2 
 
-    def __init__(self, Ne_max, l_max, omega=1, mass=1) -> None:
+    def __init__(self, Ne_max, l_max, hbar_omega=1, mass=1) -> None:
         self.Ne_max = Ne_max
         # l_max represents the maximum value of l (cannot be larger than Ne_max)
         if l_max > Ne_max:
@@ -55,7 +56,7 @@ class System:
         self.n_level_max = Ne_max // 2
         self.l_level_max = l_max
 
-        self.omega = omega
+        self.hbar_omega = hbar_omega
         self.mass = mass
 
         # List of all energies and their indices
@@ -75,9 +76,9 @@ class System:
                 n = (Ne - l) / 2
 
                 r = np.linspace(0, r_limit, r_steps)
-                _, sqrt_norm = h3d.series_wavefunction(r, k=n, l=l, omega=self.omega, mass=self.mass)
+                _, sqrt_norm = h3d.series_wavefunction(r, k=n, l=l, hbar_omega=self.hbar_omega, mass=self.mass)
 
-                wavefunctions[Ne, l] = lambda r, k=n, l=l: h3d.wavefunction(r, k=k, l=l, omega=self.omega, mass=self.mass)
+                wavefunctions[Ne, l] = lambda r, k=n, l=l: h3d.wavefunction(r, k=k, l=l, hbar_omega=self.hbar_omega, mass=self.mass)
                 sqrt_norms[Ne, l] = sqrt_norm
 
         return wavefunctions, sqrt_norms
@@ -105,6 +106,7 @@ class System:
         t = np.zeros((self.Ne_max // 2 + 1, self.l_level_max + 1, 2, self.Ne_max // 2 + 1, self.l_level_max + 1, 2), dtype=np.float64)
 
         # They are also diagonal in l
+        # TODO: check if this is actually diagonal in spin
         for n1, n2 in product(range(self.Ne_max // 2 + 1), repeat=2):
             for l in range(self.l_level_max + 1):
                 if n1 == n2:
@@ -118,28 +120,29 @@ class System:
         
                 t[n1, l, :, n2, l, :] = val
 
-        t *= 0.5 * HBAR * self.omega
+        t *= 0.5 * self.hbar_omega
         
         return t
     
 
     # Get the antisymmetrized two-body matrix elements in the HO basis
     # TODO: reduce computations exploiting hermiticity of the potential
+    # TODO: make sure the potential is antisymmetric, idiot
     def get_two_body_matrix_elements(self):
 
-        Ne_max, l_max, omega, mass = self.Ne_max, self.l_level_max, self.omega, self.mass
-        integration_limit, integration_steps = 10, 1000
+        Ne_max, l_max, hbar_omega, mass = self.Ne_max, self.l_level_max, self.hbar_omega, self.mass
+        integration_limit, integration_steps = 20, 2500
 
         # TODO: Add a way to pass the potential into the Moshinsky class
         # Set the radial wavefunctions
-        wfs = mw.set_wavefunctions(Ne_max, l_max, omega, mass, integration_limit, integration_steps)
+        wfs = mw.set_wavefunctions(Ne_max, l_max, hbar_omega, mass, integration_limit, integration_steps)
 
         # Set the Moshinsky brackets, reading from file
         start = time.time()
         moshinsky_brackets = mw.set_moshinsky_brackets(Ne_max, l_max)
         print("Time to set Moshinsky brackets:", time.time() - start)
 
-        # Set the central potential reduced matrix elements. You gave to do this for two values...
+        # Set the central potential (not antisymmetrized!) reduced matrix elements. You have to do...
         V_mats = []
         for params in [(self.V0R, self.kappaR), (-self.V0s, self.kappas)]: 
             V0, kappa = params
@@ -154,7 +157,18 @@ class System:
             central_potential_ls_coupling_basis_matrix = mw.set_central_potential_ls_coupling_basis_matrix(central_potential_reduced_matrix,
                                                                                                         moshinsky_brackets, Ne_max, l_max)
             print("Time to set ls coupling basis matrix:", time.time() - start)
+            # for n1, n2 in product(range(self.n_level_max), repeat=2):
+            #     mt = central_potential_ls_coupling_basis_matrix[n1,0, n2,0, :,0, :,0, 0]
+            #     mt2 = central_potential_ls_coupling_basis_matrix[:,0, :,0, n1,0, n2,0, 0]
+            #     #mt = central_potential_ls_coupling_basis_matrix[n1,0,n2,0,:,0,:,0,0]
+            #     print("CHECK: Is it hermitian?:", np.allclose(mt, mt2))
 
+            #     if not np.allclose(mt, mt2):
+            #         print(mt)
+            #         print(mt2)
+
+            # exit()
+            
             # Set the central potential matrix in J coupling basis
             start = time.time()
             central_potential_J_coupling_matrix = mw.set_central_potential_J_coupling_basis_matrix(central_potential_ls_coupling_basis_matrix, Ne_max, l_max)
@@ -177,15 +191,29 @@ class System:
 
         V_mat = VD + VEPr
 
+        # Some checks on V_mat
+        # Is it hermitian?
+        #V_mat = VD
+        # for n1 in range(self.n_level_max + 1):
+        #     for n2 in range(self.n_level_max + 1):
+        #         Vm = V_mat[n1,0,1,:,0,1,n2,0,1,:,0,1]
+        #         #Vm = V_mat[n1,0,1,n2,0,1,:,0,1,:,0,1]
+
+        #         herm = np.allclose(Vm, Vm.conj().T)
+        #         print("V hermitian:", herm)
+
+        #         if not herm:
+        #             print("n1, n2", n1, n2)
+        #             print(Vm)
         return V_mat
 
 
     # Energies of the HO basis eigenstates
     def get_ho_energies(self, Ne=-1, n=-1, l=-1):
         if Ne == -1:
-            return 0.5 * self.omega * (2 * n + l + 3/2)
+            return 0.5 * self.hbar_omega * (2 * n + l + 3/2)
         else:
-            return 0.5 * self.omega * Ne
+            return 0.5 * self.hbar_omega * Ne
 
     # Get the indices of the lowest energy states
     def get_lowest_energies(self):
@@ -234,7 +262,6 @@ class System:
 
     
     def index_unflattener(self, idx):
-
         idxp = 0
         for n_p in range(self.n_level_max + 1):
             Nep_min = 2 * n_p
@@ -302,7 +329,7 @@ class System:
 
 
 if __name__ == '__main__':
-    system = System(Ne_max=4, l_max=0, omega=3, mass=1)
+    system = System(Ne_max=4, l_max=0, hbar_omega=3, mass=939)
 
     # idx = system.index_flattener(0, 0, 1, 1)
     # print(idx)

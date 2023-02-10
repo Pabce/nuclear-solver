@@ -29,6 +29,19 @@ def recast_indices(mode, Nq_max, Bprime, n1prime, Aprime, n1, n2, B, A, lamb):
     l1, l2 = get_ells(A, B, lamb, eps)
     l1prime, l2prime = get_ells(Aprime, Bprime, lamb, eps)
 
+    for i in range(len(l1)):
+        if (l1[i] + l2[i] - Nq[i]) % 2 != 0:
+            print("Error in recast_indices: l1 + l2 - Nq is not even")
+            print(l1[i], l2[i], Nq[i])
+        
+        if (l1prime[i] + l2prime[i] - Nq[i]) % 2 != 0:
+            print("Error in recast_indices: l1prime + l2prime - Nq is not even")
+            print(l1prime[i], l2prime[i], Nq[i])
+        
+        if 2 * n1[i] + l1[i] + 2 * n2[i] + l2[i] != Nq[i]:
+            print("Error in recast_indices: n1 + l1 + n2 + l2 != Nq")
+            print(n1[i], l1[i], n2[i], l2[i], Nq[i])
+
     if mode == 'n':
         return [n1, l1, n2, l2, n1prime, l1prime, l2prime, lamb]
     
@@ -73,7 +86,7 @@ def get_moshinsky_arrays():
     l_min = 0
     l_max = Nq_max #lamb_max (there is an interesting reason why this is not lamb_max)
     n_max = (Nq_max - lamb_min)//2
-    brackets = np.zeros((n_max + 1, l_max - l_min + 1, n_max + 1, l_max - l_min + 1, n_max + 1, 
+    brackets = np.zeros((n_max + 1, l_max - l_min + 1, n_max + 1, l_max - l_min + 1, n_max + 1,
                                     l_max - l_min + 1, l_max - l_min + 1, lamb_max - lamb_min + 1))
     # Recast the indices (incredibly works)
     indices_even = np.vstack(recast_indices('n', Nq_max_even, *[indices_f_even[:, i] for i in range(8)])).T
@@ -81,6 +94,9 @@ def get_moshinsky_arrays():
     # Index the matrix
     brackets[tuple(indices_even.T)] = values_f_even
     brackets[tuple(indices_odd.T)] = values_f_odd
+
+    # print(indices_even.shape)
+    # print(indices_odd.shape)
 
     # Some tests
     # print(indices_f[12])
@@ -91,12 +107,13 @@ def get_moshinsky_arrays():
     # --------------------------------------------
     # Or:
     # Ne1, l1, Ne2, l2, Ne1', l1', l2', lamb  (  Ne2' = Ne1 + Ne2 - Ne1'  )
-    Ne_max = Nq_max
-    brackets_Ne = np.zeros((Ne_max + 1, l_max - l_min + 1, Ne_max + 1, l_max - l_min + 1, Ne_max + 1,
-                                    l_max - l_min + 1, l_max - l_min + 1, lamb_max - lamb_min + 1))
-    # Recast the indices
-    indices_Ne = np.vstack(recast_indices('Ne', Nq_max, *[indices_f[:, i] for i in range(8)])).T
-    # Index the matrix
-    brackets_Ne[tuple(indices_Ne.T)] = values_f
+    # Ne_max = Nq_max
+    # brackets_Ne = np.zeros((Ne_max + 1, l_max - l_min + 1, Ne_max + 1, l_max - l_min + 1, Ne_max + 1,
+    #                                 l_max - l_min + 1, l_max - l_min + 1, lamb_max - lamb_min + 1))
+    # # Recast the indices
+    # indices_Ne = np.vstack(recast_indices('Ne', Nq_max, *[indices_f[:, i] for i in range(8)])).T
+    # # Index the matrix
+    # brackets_Ne[tuple(indices_Ne.T)] = values_f
+    brackets_Ne = None
 
     return brackets, brackets_Ne
