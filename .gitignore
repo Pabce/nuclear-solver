@@ -8,3 +8,7 @@
 # Ignore executables
 *.o
 *.out
+
+# Ignore:
+*.ipynb_checkpoints
+*.DS_Store
