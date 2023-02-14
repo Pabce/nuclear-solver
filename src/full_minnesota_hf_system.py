@@ -131,7 +131,7 @@ class System:
     def get_two_body_matrix_elements(self):
 
         Ne_max, l_max, hbar_omega, mass = self.Ne_max, self.l_level_max, self.hbar_omega, self.mass
-        integration_limit, integration_steps = 20, 2500
+        integration_limit, integration_steps = 40, 5500
 
         # TODO: Add a way to pass the potential into the Moshinsky class
         # Set the radial wavefunctions

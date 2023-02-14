@@ -1,11 +1,12 @@
 import numpy as np
 from numba import cfunc, jit, float64, int64, int32, int16, int8, void, prange, njit, vectorize
 import time
-import harmonic_3d as h3d
-import convert_fortran
 from sympy.physics.wigner import wigner_9j
 from itertools import product
 import pickle
+
+import harmonic_3d as h3d
+import convert_fortran
 
 # Load the shared library (Wigner j symbol)
 # lib = ctypes.cdll.LoadLibrary('./wigner.so')
@@ -18,7 +19,7 @@ import pickle
 
 
 # This is Minnesota specific, but will live here for now
-@njit(float64(float64[:,:,:], float64, float64, int64, int64, int64, int64, float64, int64), fastmath=True)
+@njit(float64(float64[:,:,:], float64, float64, int64, int64, int64, int64, float64, int64), fastmath=True, cache=True)
 def central_potential_reduced_matrix_element(wavefunctions, V0, mu, n1, l1, n2, l2, integration_limit, integration_steps):
     r = np.linspace(0, integration_limit, integration_steps)
     # We can compute the reduced matrix element as given by Moshinsky:
@@ -43,7 +44,7 @@ def central_potential_reduced_matrix_element(wavefunctions, V0, mu, n1, l1, n2, 
     return integral
 
 
-@njit(float64(float64[:,:,:,:], float64[:,:,:,:,:,:,:,:], int64, int64, int64, int64, int64, int64, int64, int64, int64), parallel=True)
+@njit(float64(float64[:,:,:,:], float64[:,:,:,:,:,:,:,:], int64, int64, int64, int64, int64, int64, int64, int64, int64), parallel=True, cache=True)
 def central_potential_ls_coupling_basis_matrix_element(cp_red_matrix, moshinsky_brackets,
                                                          n1, l1, n2, l2, n3, l3, n4, l4, lamb):
     # Check lambda is allowed
@@ -194,7 +195,7 @@ def set_wigner_9js():
 
 # This is Minnesota specific
 # TODO: do this
-@njit(float64[:,:,:,:](float64[:,:,:], float64, float64, int64, int64, float64, int64), parallel=True, fastmath=True)
+@njit(float64[:,:,:,:](float64[:,:,:], float64, float64, int64, int64, float64, int64), parallel=True, fastmath=True, cache=True)
 def set_central_potential_reduced_matrix(wavefunctions, V0, mu, Ne_max, l_max, integration_limit, integration_steps):
 
     Nq_lim = 2 * Ne_max # THIS IS NOT Nq_max!!! (the parameter in the function that calls this one, to fill the matrix)
@@ -214,7 +215,7 @@ def set_central_potential_reduced_matrix(wavefunctions, V0, mu, Ne_max, l_max, i
     return central_potential_reduced_matrix
 
 
-@njit(float64[:,:,:,:,:,:,:,:,:](float64[:,:,:,:], float64[:,:,:,:,:,:,:,:], int64, int64), parallel=True, fastmath=True)
+@njit(float64[:,:,:,:,:,:,:,:,:](float64[:,:,:,:], float64[:,:,:,:,:,:,:,:], int64, int64), parallel=True, fastmath=True, cache=True)
 def set_central_potential_ls_coupling_basis_matrix(cp_red_matrix, moshinsky_brackets, Ne_max, l_max):
     ni_max = Ne_max // 2
     lambda_max = 2*l_max
@@ -273,7 +274,7 @@ def set_central_potential_J_coupling_basis_matrix(cp_ls_coupling_matrix, wigner_
     return central_potential_J_coupling_basis_matrix
 
 # TODO: include the "spin deltas" What??
-@njit(float64[:,:,:,:,:,:,:,:,:,:,:,:](float64[:,:,:,:,:,:,:,:,:,:,:,:,:], int64, int64), parallel=True, fastmath=True)
+@njit(float64[:,:,:,:,:,:,:,:,:,:,:,:](float64[:,:,:,:,:,:,:,:,:,:,:,:,:], int64, int64), parallel=True, fastmath=True, cache=True)
 def set_central_potential_matrix(cp_J_coupling_matrix, Ne_max, l_max):
     ni_max = Ne_max // 2
     
