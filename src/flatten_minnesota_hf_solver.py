@@ -3,10 +3,11 @@ import matplotlib.pyplot as plt
 from scipy.linalg import eigh
 from copy import deepcopy
 import time
-np.set_printoptions(precision=2)
+np.set_printoptions(precision=4, suppress=False, linewidth=200)
 
 import full_minnesota_hf_system as hfs
-import harmonic_3d as h3d
+import full_minnesota_numba as hfs_numba
+import hf_numba_helpers
 
 
 class Solver:
@@ -45,10 +46,22 @@ class Solver:
         prev_D = deepcopy(D)
 
         # First, get 1-body and 2-body matrix elements in the original basis (only need to do this once!)
-        t_matrix = self.system.matrix_ndflatten(self.system.get_one_body_matrix_elements(), dim=2)
-        V_matrix = self.system.matrix_ndflatten(self.system.get_two_body_matrix_elements(), dim=4)
+        t_matrix = self.system.matrix_ndflatten(self.system.get_one_body_matrix_elements(), dim=2, m_diagonal=True)
+        V_matrix_qn, V_non_asym_qn = self.system.get_two_body_matrix_elements()
 
-        print(V_matrix[0,1,:,:])
+        # start = time.time()
+        # #V_non_asym_1 = -self.system.matrix_ndflatten(V_non_asym_qn, dim=4, m_diagonal=True, asym=True)
+        # V_matrix_1 = self.system.matrix_ndflatten(V_matrix_qn, dim=4, m_diagonal=True, asym=True)
+        # print("Time to flatten V matrix:", time.time() - start)
+
+        start = time.time()
+        V_non_asym = hfs_numba.n_matrix_4dflatten(V_non_asym_qn, True, False, self.num_states, self.system.Ne_max, self.l_level_max)
+        V_matrix = hfs_numba.n_matrix_4dflatten(V_matrix_qn, True, True, self.num_states, self.system.Ne_max, self.l_level_max)
+        print("Time to numba flatten V matrix:", time.time() - start)
+        #V_matrix = np.zeros((self.num_states, self.num_states, self.num_states, self.num_states))
+
+        #print(V_matrix[0,2,:,:])
+        #print(t_matrix)
 
         # TESTS:
         # Is t_matrix hermitian?
@@ -76,9 +89,11 @@ class Solver:
 
                 if not antisym:
                     print("NOT ASYM! n1, n2:", n1, n2)
+                    print(system.index_unflattener(n1), system.index_unflattener(n2))
+                    print(system.index_unflattener(1), system.index_unflattener(0))
                     #print(V_matrix[n1,n2,:,:] + V_matrix[n1,n2,:,:].T)
-                    # print(V_matrix[n1,n2,:,:] - V_matrix[n1,n2,:,:].T)
-                    # print(V_matrix[n1,n2,:,:].T)
+                    print(V_matrix[n1,n2,:,:])
+                    #print(-V_matrix[n1,n2,:,:].T)
                     all_V_antisym = False
         
         print("V antisymmetric in the exchange of last two indices:", all_V_antisym)
@@ -123,10 +138,13 @@ class Solver:
             # Stop iterating if difference between previous energies is smaller than tolerance
             norm = np.linalg.norm(sp_energies - sp_energies_prev) / self.num_states
             if norm < tolerance:
+                print("")
+                print("~~~~~~~~~~~~~~~~~~~~~~ FULL SOLVER ~~~~~~~~~~~~~~~~~~~~~~~~")
+                print("----------------------------------------------")
                 print("Convergence reached after {} iterations".format(i + 1))
                 print("Single particle energies: {}".format(sp_energies))
                 print("NORM", norm)
-                hf_energy = self.compute_hf_energy(sp_energies, t_matrix, self.num_particles)
+                hf_energy = self.compute_hf_energy(sp_energies, t_matrix, V_matrix, V_non_asym, rho, D, self.num_particles)
                 return hf_energy, sp_energies, eigenvectors
             
             # Update the previous energies and the D matrix
@@ -170,29 +188,79 @@ class Solver:
         return t_matrix + gamma
 
     @staticmethod
-    def compute_hf_energy(sp_energies, t_matrix, num_particles):
-        return 0.5 * (np.trace(t_matrix[:num_particles]) + np.sum(sp_energies[:num_particles]))
+    def compute_hf_energy(sp_energies, t_matrix, V_matrix, V_non_asym, rho, D, n_particles):
+
+        # Change the basis of the matrices to the HF basis
+        D_dagger = D.conj().T
+
+        rho_hf = np.dot(D_dagger, np.dot(rho, D))
+        t_matrix_hf = np.dot(D_dagger, np.dot(t_matrix, D))
+
+        start = time.time()
+        V_matrix_prov = np.einsum('abcd,ea,df->ebcf', V_matrix, D_dagger, D, optimize='optimal')
+        V_matrix_hf = np.einsum('ebcf,gb,ch->eghf', V_matrix_prov, D_dagger, D, optimize='optimal')
+
+        V_non_asym_prov = np.einsum('abcd,ea,df->ebcf', V_non_asym, D_dagger, D, optimize='optimal')
+        V_non_asym_hf = np.einsum('ebcf,gb,ch->eghf', V_non_asym_prov, D_dagger, D, optimize='optimal')
+        print("Time to change basis (V):", time.time() - start)
+
+        #testV = hf_numba_helpers.n_change_basis_4d(V_matrix, D)
+ 
+        # For comparison purposes:
+        rho_trunc = rho_hf[:n_particles, :n_particles]
+        V_trunc = V_matrix_hf[:n_particles, :n_particles, :n_particles, :n_particles]
+        V_non_asym_trunc = V_non_asym_hf[:n_particles, :n_particles, :n_particles, :n_particles]
+        t_trunc = t_matrix_hf[:n_particles, :n_particles]
+        
+        hf_energy = 0.5 * (np.trace(t_trunc) + np.sum(sp_energies[:n_particles]))
+        
+        # print("HF ENERGY", hf_energy)
+        # exit()
+        # return hf_energy
+
+        # These two are wrong (has to be with the non-asym potential)
+        e_hartree = 0.5 * np.einsum('ijkl,ki,lj', V_non_asym_trunc, rho_trunc, rho_trunc, optimize='optimal')
+        e_fock = -0.5 * np.einsum('ijlk,ki,lj', V_non_asym_trunc, rho_trunc, rho_trunc, optimize='optimal')
+        hf_energy_2 = np.sum(sp_energies[:n_particles]) - e_hartree - e_fock
+
+        e_kin = np.einsum('ij,ji', t_trunc, rho_trunc)
+        e_int = 0.5 * np.einsum('ijkl,ki,lj', V_trunc, rho_trunc, rho_trunc, optimize='optimal')
+
+        # Another way of getting the energy
+        hf_energy_3 = np.trace(t_trunc) + 0.5 * np.einsum('ijij', V_trunc)
+        hf_energy_4 = np.sum(sp_energies[:n_particles]) - 0.5 * np.einsum('ijij', V_trunc)
+        #hf_energy_5 = np.einsum('ab,ba', t_trunc, rho_trunc) + 0.5 * np.einsum('abcd,db,ca', V_trunc, rho_trunc, rho_trunc)
+        hf_energy_5 = np.einsum('ab,ba', t_matrix, rho) + 0.5 * np.einsum('abcd,db,ca', V_matrix, rho, rho, optimize='optimal')
+        #print(np.trace(t_trunc), 0.5 * np.trace(np.einsum('ijij', V_trunc)))
+
+        # print(t_trunc)
+        # print(t_matrix)
+    
+        print("SDAS", hf_energy, hf_energy_2, hf_energy_3, hf_energy_4, hf_energy_5)
+        print("E_hartree", e_hartree)
+        print("E_fock", e_fock)
+        print("E_kin (not really)", e_kin)
+        print("E_int", e_int)
+
+        return hf_energy
     
 
 
 if __name__ == "__main__":
 
-    system = hfs.System(Ne_max=8, l_max=0, hbar_omega=3, mass=939)
+    system = hfs.System(Ne_max=8, l_max=0, hbar_omega=10, mass=939)
+    print("asdfsa")
     solver = Solver(system, num_particles=8)
 
     print("Number of states:", system.num_states)
 
     start_time = time.time()
-    hf_energy, sp_energies, eigenvectors = solver.run(max_iterations=3, mixture=0)
-
-    total_e, t_e, sp_e = hf_energy
+    hf_energy, sp_energies, eigenvectors = solver.run(max_iterations=300, mixture=0)
 
     end_time = time.time()
     print("Time elapsed: {} seconds".format(end_time - start_time))
 
-    print("Hartree-Fock energy: {} MeV".format(total_e))
-    print("T component: {} MeV".format(t_e))
-    print("SP component: {} MeV".format(sp_e))
+    print("Hartree-Fock energy: {} MeV".format(hf_energy))
 
     print(system.num_states)
 

@@ -5,6 +5,7 @@ import harmonic_3d as h3d
 import convert_fortran
 from sympy.physics.wigner import wigner_9j
 from itertools import product
+import pickle
 
 # Load the shared library (Wigner j symbol)
 # lib = ctypes.cdll.LoadLibrary('./wigner.so')
@@ -42,7 +43,7 @@ def central_potential_reduced_matrix_element(wavefunctions, V0, mu, n1, l1, n2, 
     return integral
 
 
-#@njit(float64(float64[:,:,:,:], float64[:,:,:,:,:,:,:,:], int64, int64, int64, int64, int64, int64, int64, int64, int64), parallel=True)
+@njit(float64(float64[:,:,:,:], float64[:,:,:,:,:,:,:,:], int64, int64, int64, int64, int64, int64, int64, int64, int64), parallel=True)
 def central_potential_ls_coupling_basis_matrix_element(cp_red_matrix, moshinsky_brackets,
                                                          n1, l1, n2, l2, n3, l3, n4, l4, lamb):
     # Check lambda is allowed
@@ -94,8 +95,9 @@ def central_potential_ls_coupling_basis_matrix_element(cp_red_matrix, moshinsky_
 
     return mat_el 
 
-#@njit(float64(float64[:,:,:,:,:,:,:,:,:], int64, int64, int64, int64, int64, int64, int64, int64, int64, int64, int64, int64, int64), fastmath=True)
-def central_potential_J_coupling_matrix_element(cp_ls_matrix, n1, l1, twoj1, n2, l2, twoj2, n3, l3, twoj3, n4, l4, twoj4, J):
+#@njit(float64(float64[:,:,:,:,:,:,:,:,:], int64, int64, int64, int64, int64, int64, int64, int64, int64, int64, int64, int64, int64, int64, int64), fastmath=True)
+def central_potential_J_coupling_matrix_element(cp_ls_matrix, wigner_9j_dict, n1, l1, twoj1, n2, l2, twoj2,
+                                                n3, l3, twoj3, n4, l4, twoj4, twoJ, spin_selector, parity_selector):
 
     twos1, twos2, twos3, twos4 = 1, 1, 1, 1
 
@@ -103,12 +105,31 @@ def central_potential_J_coupling_matrix_element(cp_ls_matrix, n1, l1, twoj1, n2,
     for lamb in prange(np.abs(l1 - l2), l1 + l2 + 1, 1):
         for twoS in prange(0, 3, 2):
             for twoS_prime in prange(0, 3, 2):
+                # We have included the spin and parity selectors in case we are dealing with a projector in the potential
+                if spin_selector == "triplet": # Select the triplet states
+                    if twoS_prime == 0:
+                        continue
+                elif spin_selector == "singlet": # Select the singlet states
+                    if twoS_prime == 2:
+                        continue
+                
+                if parity_selector == "odd": # Select the odd parity states
+                    if (l3 + l4) % 2 == 0:
+                        continue
+                elif parity_selector == "even": # Select the even parity states
+                    if (l3 + l4) % 2 == 1:
+                        continue
+
+
                 ls_el = cp_ls_matrix[n1, l1, n2, l2, n3, l3, n4, l4, lamb]
 
                 # Sympy
                 try:
-                    wigner_one = wigner_9j(l1, twos1/2, twoj1/2, l2, twos2/2, twoj2/2, lamb, twoS/2, J, prec=64)
-                    wigner_two = wigner_9j(l3, twos3/2, twoj3/2, l4, twos4/2, twoj4/2, lamb, twoS_prime/2, J, prec=64)
+                    # wigner_one_old = wigner_9j(l1, twos1/2, twoj1/2, l2, twos2/2, twoj2/2, lamb, twoS/2, twoJ/2, prec=64)
+                    # wigner_two_old = wigner_9j(l3, twos3/2, twoj3/2, l4, twos4/2, twoj4/2, lamb, twoS_prime/2, twoJ/2, prec=64)
+                    wigner_one = wigner_9j_dict[(2*l1, twos1, twoj1, 2*l2, twos2, twoj2, 2*lamb, twoS, twoJ)]
+                    wigner_two = wigner_9j_dict[(2*l3, twos3, twoj3, 2*l4, twos4, twoj4, 2*lamb, twoS_prime, twoJ)]
+
                 except ValueError:
                     continue
 
@@ -118,7 +139,7 @@ def central_potential_J_coupling_matrix_element(cp_ls_matrix, n1, l1, twoj1, n2,
                     continue
 
                 sqrt_one = np.sqrt((twoj1 + 1) *(twoj2 + 1) * (2*lamb + 1) * (twoS + 1))
-                sqrt_two = np.sqrt((twoj3 + 1) * (2*twoj4 + 1) * (2*lamb + 1) * (twoS_prime + 1))
+                sqrt_two = np.sqrt((twoj3 + 1) * (twoj4 + 1) * (2*lamb + 1) * (twoS_prime + 1))
 
                 mat_el += ls_el * wigner_one * wigner_two * sqrt_one * sqrt_two
     
@@ -160,6 +181,17 @@ def set_moshinsky_brackets(Ne_max, l_max):
 
     return moshinsky_brackets
 
+
+# load the Wigner 9j dictionary
+def set_wigner_9js():
+    # Load the pickle file
+    with open('saved_values/wigner_9js.pcl', 'rb') as handle:
+        wigner_9j_dict = pickle.load(handle)
+    
+    return wigner_9j_dict
+
+
+
 # This is Minnesota specific
 # TODO: do this
 @njit(float64[:,:,:,:](float64[:,:,:], float64, float64, int64, int64, float64, int64), parallel=True, fastmath=True)
@@ -182,7 +214,7 @@ def set_central_potential_reduced_matrix(wavefunctions, V0, mu, Ne_max, l_max, i
     return central_potential_reduced_matrix
 
 
-#@njit(float64[:,:,:,:,:,:,:,:,:](float64[:,:,:,:], float64[:,:,:,:,:,:,:,:], int64, int64), parallel=True, fastmath=True)
+@njit(float64[:,:,:,:,:,:,:,:,:](float64[:,:,:,:], float64[:,:,:,:,:,:,:,:], int64, int64), parallel=True, fastmath=True)
 def set_central_potential_ls_coupling_basis_matrix(cp_red_matrix, moshinsky_brackets, Ne_max, l_max):
     ni_max = Ne_max // 2
     lambda_max = 2*l_max
@@ -212,7 +244,7 @@ def set_central_potential_ls_coupling_basis_matrix(cp_red_matrix, moshinsky_brac
 
 
 #@njit(float64[:,:,:,:,:,:,:,:,:,:,:,:,:](float64[:,:,:,:,:,:,:,:,:], int64, int64), parallel=True, fastmath=True)
-def set_central_potential_J_coupling_basis_matrix(cp_ls_coupling_matrix, Ne_max, l_max):
+def set_central_potential_J_coupling_basis_matrix(cp_ls_coupling_matrix, wigner_9j_dict, Ne_max, l_max, spin_selector, parity_selector):
     ni_max = Ne_max // 2
     twoj_max = 2*l_max + 1
     twoJ_max = 2 * twoj_max
@@ -232,9 +264,11 @@ def set_central_potential_J_coupling_basis_matrix(cp_ls_coupling_matrix, Ne_max,
                             for n3 in prange(0, (Ne_max - l) // 2 + 1):
                                 for n4 in prange(0, (Ne_max - l_prime) // 2 + 1):
                                     for twoJ in range(np.abs(twoj - twoj_prime), twoj + twoj_prime + 1, 2):
-                                        central_potential_J_coupling_basis_matrix[n1, l, twoj_idx, n2, l_prime, twoj_prime_idx, n3, l, twoj_idx, n4, l_prime, twoj_prime_idx, twoJ] =\
-                                            central_potential_J_coupling_matrix_element(cp_ls_coupling_matrix,
-                                                    n1, l, twoj, n2, l_prime, twoj_prime, n3, l, twoj, n4, l_prime, twoj_prime, twoJ)
+
+                                        central_potential_J_coupling_basis_matrix[n1, l, twoj_idx, n2, l_prime, twoj_prime_idx, n3,\
+                                                                                 l, twoj_idx, n4, l_prime, twoj_prime_idx, twoJ] =\
+                                            central_potential_J_coupling_matrix_element(cp_ls_coupling_matrix, wigner_9j_dict, n1, l, twoj, n2, l_prime,
+                                                    twoj_prime, n3, l, twoj, n4, l_prime, twoj_prime, twoJ, spin_selector, parity_selector)
     
     return central_potential_J_coupling_basis_matrix
 
@@ -277,6 +311,11 @@ def main(Ne_max, l_max, hbar_omega, mass, integration_limit, integration_steps):
     moshinsky_brackets = set_moshinsky_brackets(Ne_max, l_max)
     print("Time to set Moshinsky brackets:", time.time() - start)
 
+    # Set the Wigner 9j symbols, reading from file
+    start = time.time()
+    wigner_9j_dict = set_wigner_9js()
+    print("Time to set Wigner 9j symbols:", time.time() - start)
+
     # Set the central potential reduced matrix elements
     start = time.time()
     central_potential_reduced_matrix = set_central_potential_reduced_matrix(wfs, 100.2, 2.1,
@@ -303,7 +342,8 @@ def main(Ne_max, l_max, hbar_omega, mass, integration_limit, integration_steps):
 
     # Set the central potential matrix in J coupling basis
     start = time.time()
-    central_potential_J_coupling_matrix = set_central_potential_J_coupling_basis_matrix(central_potential_ls_coupling_basis_matrix, Ne_max, l_max)
+    central_potential_J_coupling_matrix = set_central_potential_J_coupling_basis_matrix(central_potential_ls_coupling_basis_matrix,
+                                                                                                        wigner_9j_dict, Ne_max, l_max)
     print("Time to set J coupling basis matrix:", time.time() - start)
     # cpj = central_potential_J_coupling_matrix_element(central_potential_ls_coupling_basis_matrix, 1, 1, 1.5, 1, 1, 1.5, 1, 1, 1.5, 1, 1, 1.5, 4)
     # print(cpj)

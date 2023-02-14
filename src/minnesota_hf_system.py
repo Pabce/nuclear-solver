@@ -13,7 +13,6 @@ import ctypes
 from scipy import LowLevelCallable
 from numba import cfunc, jit
 from numba.types import intc, CPointer, float64, int32, int64
-from minnesota_cfuncs import c_potential_l0, nb_potential_l0
 
 HBAR = 197.3269788 # MeV * fm
 #HBAR = 1
@@ -94,7 +93,7 @@ class System:
 
         #t0 = time.time()
         radial_integral = np.sum(r1**2 * r2**2 * rfunc_1 * rfunc_2 * potential_l0 * rfunc_3 * rfunc_4) * rect
-        radial_integral *= 1 #4 * np.pi #1/ (4 * np.pi)
+        radial_integral *= 1/(4*np.pi) #4 * np.pi #1/ (4 * np.pi)
         #t1 = time.time()
         #print(f"GRID Time to compute integral: {t1 - t0}, Value: {radial_integral}")
 
@@ -134,6 +133,8 @@ class System:
     def get_one_body_matrix_elements(self):
         # As given in https://wikihost.nscl.msu.edu/TalentDFT/lib/exe/fetch.php?media=ho_spherical.pdf,
         # the one-body matrix elements for this model in the HO basis are...
+        # I'm almost sure the above is wrong. As the particles are trapped in a HO potential, the "kinetic energy"
+        # is just the harmonic oscillator energy, and the OBME should be diagonal in the HO basis.
 
         t = np.zeros((self.num_states, self.num_states)) 
 
@@ -146,12 +147,15 @@ class System:
 
                         if k1 == k2:
                             t[idx1, idx2] = 2 * k1 + l + 3/2
-                        elif k1 == k2 - 1:
-                            t[idx1, idx2] = np.sqrt(k2 * (k2 + l + 1/2))
-                        elif k1 == k2 + 1:
-                            t[idx1, idx2] = np.sqrt(k1 * (k1 + l + 1/2))
                         else:
                             t[idx1, idx2] = 0
+
+                        # elif k1 == k2 - 1:
+                        #     t[idx1, idx2] = np.sqrt(k2 * (k2 + l + 1/2))
+                        # elif k1 == k2 + 1:
+                        #     t[idx1, idx2] = np.sqrt(k1 * (k1 + l + 1/2))
+                        # else:
+                        #     t[idx1, idx2] = 0
 
         t *= 0.5 * self.hbar_omega
 

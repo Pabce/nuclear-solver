@@ -1,0 +1,59 @@
+!    -*- f90 -*-
+! Note: the context of this file is case sensitive.
+
+python module allos ! in 
+    interface  ! in :allos
+        subroutine allosbrac(nqmax,lmin,lmax,co,si,brac) ! in :allos:allosbrac.f90
+            integer, required,intent(in) :: nqmax
+            integer, required,intent(in) :: lmin
+            integer, required,intent(in) :: lmax
+            double precision :: co
+            double precision :: si
+            double precision dimension(1 + lmax,1 + (-lmin + nqmax) / 2,1 + (-lmin + nqmax) / 2,1 + (-lmin + nqmax) / 2,1 + (-lmin + nqmax) / 2,1 + lmax,1 + (-lmin + nqmax) / 2,1 + lmax - lmin), depend(nqmax,lmin,lmax),intent(in, out) :: brac
+        end subroutine allosbrac
+        subroutine arr(fac,dfac,defac,rfac,nqmax) ! in :allos:allosbrac.f90
+            double precision dimension(2 + 2 * nqmax) :: fac
+            double precision dimension(2 + nqmax),depend(nqmax) :: dfac
+            double precision dimension(2 + nqmax / 2),depend(nqmax) :: defac
+            double precision dimension(1 + nqmax),depend(nqmax) :: rfac
+            integer, optional,check(shape(fac, 0) == 2 + 2 * nqmax),depend(fac) :: nqmax=(-2 + shape(fac, 0)) / 2
+        end subroutine arr
+        subroutine flphi(nqmax,lmax,lmin,l,t,bi,rfac,fl) ! in :allos:allosbrac.f90
+            integer, optional,check(shape(bi, 0) == 2 + 2 * nqmax),depend(bi) :: nqmax=(-2 + shape(bi, 0)) / 2
+            integer, optional,check(shape(fl, 0) == 1 + lmax),depend(fl) :: lmax=-1 + shape(fl, 0)
+            integer, required,intent(in) :: lmin
+            integer :: l
+            double precision :: t
+            double precision dimension(2 + 2 * nqmax,2 + 2 * nqmax) :: bi
+            double precision dimension(1 + nqmax),depend(nqmax) :: rfac
+            double precision dimension(1 + lmax,1 + (-lmin + nqmax) / 2,1 + lmax),check(shape(fl, 1) == 1 + (-lmin + nqmax) / 2),depend(nqmax,lmin) :: fl
+        end subroutine flphi
+        function wigmod(l1,l2,l3,m1,m2,bi,nmax) ! in :allos:allosbrac.f90
+            integer :: l1
+            integer :: l2
+            integer :: l3
+            integer :: m1
+            integer :: m2
+            double precision dimension(1 + nmax,1 + nmax) :: bi
+            integer, optional,check(shape(bi, 0) == 1 + nmax),depend(bi) :: nmax=-1 + shape(bi, 0)
+            double precision :: wigmod
+        end function wigmod
+        subroutine coe(nmax,fac,bi) ! in :allos:allosbrac.f90
+            integer, optional,check(shape(fac, 0) == 1 + nmax),depend(fac) :: nmax=-1 + shape(fac, 0)
+            double precision dimension(1 + nmax) :: fac
+            double precision dimension(1 + nmax,1 + nmax),depend(nmax) :: bi
+        end subroutine coe
+        subroutine coefrec(maxcoe,l,nn,nqmax,psip,psim) ! in :allos:allosbrac.f90
+            integer, optional,check(shape(psip, 0) == maxcoe),depend(psip) :: maxcoe=shape(psip, 0)
+            integer :: l
+            integer :: nn
+            integer :: nqmax
+            double precision dimension(maxcoe,maxcoe) :: psip
+            double precision dimension(maxcoe,maxcoe),depend(maxcoe) :: psim
+        end subroutine coefrec
+    end interface 
+end python module allos
+
+! This file was auto-generated with f2py (version:1.23.5).
+! See:
+! https://web.archive.org/web/20140822061353/http://cens.ioc.ee/projects/f2py2e

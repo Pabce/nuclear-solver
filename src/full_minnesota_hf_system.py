@@ -4,18 +4,14 @@ We start with a simplified neutron drop system in the harmonic oscillator basis.
 '''
 
 import numpy as np
-import matplotlib.pyplot as plt
 from itertools import product
 from scipy.integrate import quad, dblquad
 import harmonic_3d as h3d
 import time
-import ctypes
-from scipy import LowLevelCallable
-from numba import cfunc, jit
-from numba.types import intc, CPointer, float64, int32, int64
-from minnesota_cfuncs import c_potential_l0, nb_potential_l0
 import moshinsky_way as mw
-from itertools import product
+import hf_numba_helpers 
+
+from copy import deepcopy
 
 HBAR = 197.3269788 # MeV * fm
 #HBAR = 1
@@ -101,7 +97,8 @@ class System:
     def get_one_body_matrix_elements(self):
         # As given in https://wikihost.nscl.msu.edu/TalentDFT/lib/exe/fetch.php?media=ho_spherical.pdf,
         # the one-body matrix elements for this model in the HO basis are...
-        # These elements only depend on n and l, not on the spin:
+        # These elements only depend on n and l, not on the spin.
+        # Again, pretty sure the above is wrong and the elements should be diagonal in the HO basis.
 
         t = np.zeros((self.Ne_max // 2 + 1, self.l_level_max + 1, 2, self.Ne_max // 2 + 1, self.l_level_max + 1, 2), dtype=np.float64)
 
@@ -111,17 +108,20 @@ class System:
             for l in range(self.l_level_max + 1):
                 if n1 == n2:
                     val = 2 * n1 + l + 3/2
-                elif n1 == n2 - 1:
-                    val = np.sqrt(n2 * (n2 + l + 1/2))
-                elif n1 == n2 + 1:
-                    val = np.sqrt(n1 * (n1 + l + 1/2))
+
+                # elif n1 == n2 - 1:  #--> this is nonsensical, I think
+                #     val = np.sqrt(n2 * (n2 + l + 1/2))
+                # elif n1 == n2 + 1:
+                #     val = np.sqrt(n1 * (n1 + l + 1/2))
+
                 else:
                     val = 0
-        
-                t[n1, l, :, n2, l, :] = val
+
+                for twoj_idx in range(2):
+                    t[n1, l, twoj_idx, n2, l, twoj_idx] = val
 
         t *= 0.5 * self.hbar_omega
-        
+
         return t
     
 
@@ -142,10 +142,23 @@ class System:
         moshinsky_brackets = mw.set_moshinsky_brackets(Ne_max, l_max)
         print("Time to set Moshinsky brackets:", time.time() - start)
 
+        # Set the Wigner 9j symbols, reading from file
+        start = time.time()
+        wigner_9j_dict = mw.set_wigner_9js()
+        print("Time to set Wigner 9j symbols:", time.time() - start)
+
+        print('---------------------------------------------------------------')
+
         # Set the central potential (not antisymmetrized!) reduced matrix elements. You have to do...
+        # Minnesota potential
+        # 1. R component: VR * 1/2*(1 + Pr)
+        # 2. s component: Vs * 1/2*(1 - Psigma) * 1/2*(1 + Pr)
+        # 3... Ignoring for now
+
+        cp_mats = []
         V_mats = []
-        for params in [(self.V0R, self.kappaR), (-self.V0s, self.kappas)]: 
-            V0, kappa = params
+        for params in [(self.V0R, self.kappaR, "none", "even"), (-self.V0s, self.kappas, "singlet", "even"), (-self.V0t, self.kappat, "triplet", "even")]: 
+            V0, kappa, spin_selector, parity_selector = params
 
             start = time.time()
             central_potential_reduced_matrix = mw.set_central_potential_reduced_matrix(wfs, V0, kappa,
@@ -171,7 +184,8 @@ class System:
             
             # Set the central potential matrix in J coupling basis
             start = time.time()
-            central_potential_J_coupling_matrix = mw.set_central_potential_J_coupling_basis_matrix(central_potential_ls_coupling_basis_matrix, Ne_max, l_max)
+            central_potential_J_coupling_matrix = mw.set_central_potential_J_coupling_basis_matrix(central_potential_ls_coupling_basis_matrix, 
+                                                                                wigner_9j_dict, Ne_max, l_max, spin_selector, parity_selector)
             print("Time to set J coupling basis matrix:", time.time() - start)
             
             # Get the central potential matrix, once and for all
@@ -179,33 +193,70 @@ class System:
             central_potential_matrix = mw.set_central_potential_matrix(central_potential_J_coupling_matrix, Ne_max, l_max)
             print("Time to set central potential matrix:", time.time() - start)
 
-            V_mats.append(central_potential_matrix)
+            cp_mats.append(central_potential_matrix)
 
             print("------------------------------------------------------------------------------")
+        
+        # cp_mats have components (n1, l1, twoj1, n2, l2, twoj2, n3, l3, twoj3, n4, l4, twoj4)
+        v = cp_mats[0] + cp_mats[1] + cp_mats[2]
 
-        vr, vs = V_mats
-        vr_a, vs_a = V_mats
+        # Antisymmetrize the potential matrix
+        v_a = np.zeros_like(v)
+        for n1 in range(self.n_level_max + 1):
+            for n2 in range(self.n_level_max + 1):
+                Vm = v[n1,0,1,n2,0,1,:,0,1,:,0,1]
 
-        VD = 0.5 * (vr + vs)
-        VEPr = 0.5 * (vr_a + vs_a)
+                #print(np.allclose(Vm, -Vm.T))
+                
+                v_a[n1,0,1,n2,0,1,:,0,1,:,0,1] = Vm - Vm.T
 
-        V_mat = VD + VEPr
+
+        V_mat = v_a
+        V_non_asym = v
+
+        print("All zeros?", np.allclose(V_mat, 0))
+        
+        all_antisyms = True
+        # Is the potential antisymmetric in the last two states?
+        for n1 in range(self.n_level_max + 1):
+            for n2 in range(self.n_level_max + 1):
+                Vm = V_mat[n1,0,1,n2,0,1,:,0,1,:,0,1]
+                Vm_t = V_mat[n1,0,1,n2,0,1,:,0,1,:,0,1].T
+
+                antisym = np.allclose(Vm, -Vm_t)
+                if not antisym:
+                    print("n1, n2", n1, n2)
+                    print(Vm.shape)
+                    print(Vm_t.shape)
+                    all_antisyms = False
+        print("All antisym?", all_antisyms)
+
 
         # Some checks on V_mat
-        # Is it hermitian?
-        #V_mat = VD
-        # for n1 in range(self.n_level_max + 1):
-        #     for n2 in range(self.n_level_max + 1):
-        #         Vm = V_mat[n1,0,1,:,0,1,n2,0,1,:,0,1]
-        #         #Vm = V_mat[n1,0,1,n2,0,1,:,0,1,:,0,1]
+        # Is it sym?
+        all_sym = True
+        for n1 in range(self.n_level_max + 1):
+            for n2 in range(self.n_level_max + 1):
+                Vm = V_mat[n1,0,1,n2,0,1,:,0,1,:,0,1]
+                Vm2 = V_mat[:,0,1,:,0,1,n1,0,1,n2,0,1]
 
-        #         herm = np.allclose(Vm, Vm.conj().T)
-        #         print("V hermitian:", herm)
+                sym = np.allclose(Vm, Vm2)
+                #print("V sym:", sym)
 
-        #         if not herm:
-        #             print("n1, n2", n1, n2)
-        #             print(Vm)
-        return V_mat
+                if not sym:
+                    print("n1, n2", n1, n2)
+                    print(Vm.shape)
+                    print(Vm2.shape)
+                    all_sym = False
+        print("All sym?", all_sym)
+
+        # print(V_mat[0,0,1,1,0,1,:,0,1,:,0,1])
+        # print(self.index_flattener(0,0,1,-1))
+        # print(self.index_flattener(1,0,1,-1))
+
+        #exit()
+
+        return V_mat, V_non_asym
 
 
     # Energies of the HO basis eigenstates
@@ -249,7 +300,7 @@ class System:
 
             if n_p == n and l > lp_max:
                 raise ValueError("The value of l={} is too large for the given value of n={} (for the system's Ne_max={}, l_level_max={})".\
-                                                                                                            format(l, n, self.Ne_max, self.l_level_max))
+                                                                                                        format(l, n, self.Ne_max, self.l_level_max))
 
             for lp in range(lp_max + 1):
                 for twojp in range(np.abs(2 * lp - 1), 2 * lp + 2, 2):
@@ -277,12 +328,14 @@ class System:
         raise ValueError("The index provided is too large")
     
 
-    # This is probably mega-slow for larger systems and will need to be numbad
-    def matrix_ndflatten(self, matrix, dim=2):
+    # This is probably mega-slow for larger systems and will need to be numbad. Indeed.
+    # TODO: Does this need any extra info on how to treat the ms? Does adding m_diagonal even make sense?
+    # Make sure the chipmunks don't eat the hamiltonian
+    def matrix_ndflatten(self, matrix, dim=2, m_diagonal=False, asym=False):
         shape_tuple = (self.num_states,) * dim
         flat_matrix = np.zeros(shape_tuple)
 
-        it = np.nditer(matrix, flags=['multi_index'])
+        it = np.nditer(matrix, flags=['multi_index', 'refs_ok'])
 
         n, l, twoj_idx, twoj = np.zeros(dim, dtype=int), np.zeros(dim, dtype=int), np.zeros(dim, dtype=int), np.zeros(dim, dtype=int)
         idx = np.zeros(dim, dtype=int)
@@ -295,41 +348,41 @@ class System:
             # Special unphysical case: FIXME
             if np.any(twoj < 0):
                 continue
+            # Unneeded values for the flattened matrix 
+            if np.any(2 * n + l > self.Ne_max):
+                # print("Skipping", n, l, twoj)
+                # print("Value", el)
+                continue
 
             for twom in product(*[range(-twoj[d], twoj[d] + 1, 2) for d in range(dim)]):
-                for d in range(dim):
-                    idx[d] = self.index_flattener(n[d], l[d], twoj[d], twom[d])
+                for i in range(dim):
+                    idx[i] = self.index_flattener(n[i], l[i], twoj[i], twom[i])
 
-                #print(idx, el, n, l, twoj, twom)
+                non_zero = True
+                if m_diagonal:
+                    # TODO: this should be changed if the matrix you are flattening is not antysymmetrized in the last two indices
+                    m1 = twom[0:dim // 2]
+                    m2 = twom[dim // 2:]
+                    if asym:
+                        if m1 != m2 and m1 != m2[::-1]:
+                            # print(twom, m1, m2)
+                            non_zero = False
+                    else:
+                        if m1 != m2:
+                            non_zero = False
+
+                if not non_zero:
+                    flat_matrix[tuple(idx)] = 0
+                    continue
+
                 flat_matrix[tuple(idx)] = el
-
-        # for el in it:
-
-        #     n1, l1, twoj1_idx = it.multi_index[0:3] 
-        #     n2, l2, twoj2_idx = it.multi_index[3:6]
-        #     twoj1 = 2 * l1 - 1 + twoj1_idx * 2
-        #     twoj2 = 2 * l2 - 1 + twoj2_idx * 2
-
-        #     # Special unphysical case:
-        #     if (twoj1 == -1 and l1 == 0) or (twoj2 == -1 and l2 == 0):
-        #         continue
-                
-        #     print(n1, n2, l1, l2, twoj1, twoj2)
-        #     for twom1 in range(-twoj1, twoj1 + 1, 2):
-        #         for twom2 in range(-twoj2, twoj2 + 1, 2):
-        #             idx1 = self.index_flattener(n1, l1, twoj1, twom1)
-        #             idx2 = self.index_flattener(n2, l2, twoj2, twom2)
-
-        #             flat_matrix[idx1, idx2] = el
         
         return flat_matrix
-        
-
 
 
 
 if __name__ == '__main__':
-    system = System(Ne_max=4, l_max=0, hbar_omega=3, mass=939)
+    system = System(Ne_max=4, l_max=0, hbar_omega=240, mass=939)
 
     # idx = system.index_flattener(0, 0, 1, 1)
     # print(idx)

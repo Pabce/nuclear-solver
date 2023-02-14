@@ -43,10 +43,10 @@ class Solver:
         # Fisrt, get 1-body and 2-body matrix elements in the original basis (only need to do this once!)
         t_matrix = self.system.get_one_body_matrix_elements()
         V_matrix = self.system.get_two_body_matrix_elements()
+        #V_matrix = np.zeros((self.num_states, self.num_states, self.num_states, self.num_states))
 
-        print(V_matrix[0,1,:,:])
-        # print(4*np.pi*V_matrix[0,0,:,:])
-        # print(16*np.pi**2*V_matrix[0,0,:,:])
+        # print(V_matrix[0,1,:,:])
+        # print(V_matrix[0,0,:,:])
 
         # TESTS:
         # Is t_matrix hermitian?
@@ -106,18 +106,13 @@ class Solver:
             # print(rho)
             # print(rho[0::2, 1::2])
             #print(hamiltonian)
-            #print(D)
+
             # Is D unitary?
             print("D unitary:", np.allclose(np.dot(D, D.conj().T), np.eye(self.num_states)))
             # Is the hamiltonian hermitian?
             print("H hermitian:", np.allclose(hamiltonian, hamiltonian.conj().T))
             # # Is the hamiltonian diagonal in spin?
             # print("H diagonal in spin:", np.all(hamiltonian[0::2, 1::2]) == 0)
-
-            # Print rho up to 3 decimals
-            #print(rho)
-            # print(t_matrix)
-            # print(V_matrix)
 
 
             # Diagonalize the single-particle hamiltonian
@@ -169,7 +164,7 @@ class Solver:
     def get_hamiltonian(t_matrix, V_matrix, rho):
         # There is a conflict between the notes and the PDF -> not sure if contraction is over indices 2, 4 or 4, 2...
         # Gamma is a contraction over mu, sigma of: V_alpha,sigma,beta,mu * rho_mu,sigma
-        gamma = np.einsum('abcd,bd->ac', V_matrix, rho)
+        gamma = np.einsum('abcd,db->ac', V_matrix, rho)
 
         # Is gamma diagonal in spin?
         print("Gamma diagonal in spin:", np.allclose(gamma[0::2, 1::2], 0))
@@ -219,7 +214,7 @@ class Solver:
         print("SDAS", hf_energy, hf_energy_3, hf_energy_4, hf_energy_5)
         # print("E_hartree", e_hartree)
         # print("E_fock", e_fock)
-        print("E_kin", e_kin)
+        print("E_kin (not really)", e_kin)
         print("E_int", e_int)
 
         return hf_energy
@@ -228,7 +223,7 @@ class Solver:
 if __name__ == "__main__":
 
     # Mass is neutron mass, you fucking retard
-    system = hfs.System(k_num=5, l_num=1, hbar_omega=3, mass=939)
+    system = hfs.System(k_num=5, l_num=1, hbar_omega=10, mass=939)
     solver = Solver(system, n_particles=8)
 
     start_time = time.time()
