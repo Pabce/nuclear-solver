@@ -8,6 +8,8 @@ import pickle
 import harmonic_3d as h3d
 import convert_fortran
 
+SAVES_DIR = "/Users/pbarham/OneDrive/workspace/cern/hartree/saved_values"
+
 # Load the shared library (Wigner j symbol)
 # lib = ctypes.cdll.LoadLibrary('./wigner.so')
 # ninej = lib.NineJSymbol
@@ -102,7 +104,21 @@ def central_potential_J_coupling_matrix_element(cp_ls_matrix, wigner_9j_dict, n1
 
     twos1, twos2, twos3, twos4 = 1, 1, 1, 1
 
-    mat_el = 0
+    # We have included the spin and parity selectors in case we are dealing with a projector in the potential
+    if parity_selector == "odd": # Select the odd parity states
+        if (l3 + l4) % 2 == 0:
+            return 0.
+    elif parity_selector == "even": # Select the even parity states
+        if (l3 + l4) % 2 == 1:
+            return 0.
+
+    # TODO: check that the lambda is correct
+    # Note: in the matrix elements you are asking for, l1=l3, l2=l4, and therefore lambda' is redundant... OR IS IT??
+    # In any case, for now...
+    if l1 != l3 or l2 != l4:
+        return 0.
+
+    mat_el = 0.
     for lamb in prange(np.abs(l1 - l2), l1 + l2 + 1, 1):
         for twoS in prange(0, 3, 2):
             for twoS_prime in prange(0, 3, 2):
@@ -113,18 +129,9 @@ def central_potential_J_coupling_matrix_element(cp_ls_matrix, wigner_9j_dict, n1
                 elif spin_selector == "singlet": # Select the singlet states
                     if twoS_prime == 2:
                         continue
-                
-                if parity_selector == "odd": # Select the odd parity states
-                    if (l3 + l4) % 2 == 0:
-                        continue
-                elif parity_selector == "even": # Select the even parity states
-                    if (l3 + l4) % 2 == 1:
-                        continue
-
 
                 ls_el = cp_ls_matrix[n1, l1, n2, l2, n3, l3, n4, l4, lamb]
 
-                # Sympy
                 try:
                     # wigner_one_old = wigner_9j(l1, twos1/2, twoj1/2, l2, twos2/2, twoj2/2, lamb, twoS/2, twoJ/2, prec=64)
                     # wigner_two_old = wigner_9j(l3, twos3/2, twoj3/2, l4, twos4/2, twoj4/2, lamb, twoS_prime/2, twoJ/2, prec=64)
@@ -144,7 +151,7 @@ def central_potential_J_coupling_matrix_element(cp_ls_matrix, wigner_9j_dict, n1
 
                 mat_el += ls_el * wigner_one * wigner_two * sqrt_one * sqrt_two
     
-    return mat_el
+    return float(mat_el)
 
 
 # ----------------------------------------------------------------------------------------------
@@ -168,7 +175,7 @@ def set_wavefunctions(Ne_max, l_max, hbar_omega, mass, integration_limit, integr
 def set_moshinsky_brackets(Ne_max, l_max):
     # Get the full brackets form the Fortran generated values (for now, when they are bigger
     # you may have to pre-slice it)
-    full_brackets, _ = convert_fortran.get_moshinsky_arrays()
+    full_brackets, _ = convert_fortran.get_moshinsky_arrays(saves_dir=SAVES_DIR)
     # Get the correct slice
     # n1, l1, n2, l2, n1', l1', l2', lamb   (  n2' = (2*n1 + l1 + 2*n2 + l2 - 2*n1' - l1' - l2')/2  )
     
@@ -186,7 +193,7 @@ def set_moshinsky_brackets(Ne_max, l_max):
 # load the Wigner 9j dictionary
 def set_wigner_9js():
     # Load the pickle file
-    with open('saved_values/wigner_9js.pcl', 'rb') as handle:
+    with open('{}/wigner_9js.pcl'.format(SAVES_DIR), 'rb') as handle:
         wigner_9j_dict = pickle.load(handle)
     
     return wigner_9j_dict

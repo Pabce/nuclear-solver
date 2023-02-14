@@ -53,7 +53,7 @@ def recast_indices(mode, Nq_max, Bprime, n1prime, Aprime, n1, n2, B, A, lamb):
         return [Ne1, l1, Ne2, l2, Ne1prime, l1prime, l2prime, lamb]
 
 
-def get_moshinsky_arrays():
+def get_moshinsky_arrays(saves_dir=None):
     # Prepare the field
     lamb_max = 16
     lamb_min = 0
@@ -66,8 +66,8 @@ def get_moshinsky_arrays():
     brackets_f = np.zeros((lamb_max + 1, sz, sz, sz, sz, lamb_max + 1, sz, lamb_max - lamb_min + 1))
 
     # Open the file and load the Fortran computed values
-    values_and_indices_f_even = np.loadtxt('OSBRACKETS/out_even.dat')
-    values_and_indices_f_odd = np.loadtxt('OSBRACKETS/out_odd.dat')
+    values_and_indices_f_even = np.loadtxt('{}/out_even.dat'.format(saves_dir))
+    values_and_indices_f_odd = np.loadtxt('{}/out_odd.dat'.format(saves_dir))
     values_f_even = values_and_indices_f_even[:, -1]
     values_f_odd = values_and_indices_f_odd[:, -1]
     indices_f_even = values_and_indices_f_even[:, :-1].astype(int)
