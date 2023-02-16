@@ -40,6 +40,7 @@ class System:
 
         # l can go from Ne to 0 in steps of 2
         num_states = 0
+        num_j_states = 0
         for Ne in range(Ne_max + 1):
             max_l = min(Ne, l_max)
             for l in range(Ne, -1, -2):
@@ -47,8 +48,10 @@ class System:
                     continue
                 for twoj in range(np.abs(2*l - 1), 2*l + 2, 2):
                     num_states += twoj + 1 # for the j and m_j degeneracy
+                    num_j_states += 1
 
         self.num_states = int(num_states)
+        self.num_j_states = int(num_j_states)
         self.n_level_max = Ne_max // 2
         self.l_level_max = l_max
 
@@ -201,60 +204,89 @@ class System:
         v = cp_mats[0] + cp_mats[1] + cp_mats[2]
 
         # Antisymmetrize the potential matrix
-        v_a = np.zeros_like(v)
-        for n1 in range(self.n_level_max + 1):
-            for n2 in range(self.n_level_max + 1):
-                Vm = v[n1,0,1,n2,0,1,:,0,1,:,0,1]
-
-                #print(np.allclose(Vm, -Vm.T))
+        # v_a = np.zeros_like(v)
+        # for n1, n2 in product(range(self.n_level_max + 1), repeat=2):
+        #     for l1, l2, l3, l4 in product(range(self.l_level_max + 1), repeat=4):
+        #         for twoj1_idx, twoj2_idx, twoj3_idx, twoj4_idx in product(range(2), repeat=4):
+        #             Vm = v[n1,l1,twoj1_idx, n2,l2,twoj2_idx, :,l3,twoj3_idx, :,l4,twoj4_idx]
+        #             Vm2 = v[n1,l1,twoj1_idx, n2,l2,twoj2_idx, :,l4,twoj4_idx, :,l3,twoj3_idx]
                 
-                v_a[n1,0,1,n2,0,1,:,0,1,:,0,1] = Vm - Vm.T
-
+        #             v_a[n1,l1,twoj1_idx, n2,l2,twoj2_idx, :,l3,twoj3_idx, :,l4,twoj4_idx] = Vm - Vm2.T
+        #             v_a[:,l3,twoj3_idx, :,l4,twoj4_idx, n1,l1,twoj1_idx, n2,l2,twoj2_idx] = Vm - Vm2.T
+        
+        v_a = np.zeros_like(v)
+        for n1, n2 in product(range(self.n_level_max + 1), repeat=2):
+            for l1, l2 in product(range(self.l_level_max + 1), repeat=2):
+                for twoj1_idx, twoj2_idx in product(range(2), repeat=2):
+                    Vm = v[n1,l1,twoj1_idx, n2,l2,twoj2_idx, :,:,:, :,:,:]
+                    Vm_t = Vm.transpose((3,4,5, 0,1,2))
+                
+                    v_a[n1,l1,twoj1_idx, n2,l2,twoj2_idx, :,:,:, :,:,:] = Vm - Vm_t
 
         V_mat = v_a
         V_non_asym = v
 
+        # print(self.num_states)
+        # print(V_mat.shape)
+
+        # Some checks
         print("All zeros?", np.allclose(V_mat, 0))
+        print("Fraction of non-zero elements?", np.count_nonzero(V_mat)/V_mat.size)
+
+        print("wtf All antisym", np.allclose(v_a, -v_a.transpose((0,1,2, 3,4,5, 9,10,11, 6,7,8))))
         
-        all_antisyms = True
-        # Is the potential antisymmetric in the last two states?
-        for n1 in range(self.n_level_max + 1):
-            for n2 in range(self.n_level_max + 1):
-                Vm = V_mat[n1,0,1,n2,0,1,:,0,1,:,0,1]
-                Vm_t = V_mat[n1,0,1,n2,0,1,:,0,1,:,0,1].T
+        # all_antisyms = True
+        # # Is the potential antisymmetric in the last two states?
+        # for n1, n2 in product(range(self.n_level_max + 1), repeat=2):
+        #     for l1, l2, l3, l4 in product(range(self.l_level_max + 1), repeat=4):
+        #         for twoj1_idx, twoj2_idx, twoj3_idx, twoj4_idx in product(range(2), repeat=4):
+        #             Vm = V_mat[n1,l1,twoj1_idx,n2,l2,twoj2_idx,:,l3,twoj3_idx,:,l4,twoj4_idx]
+        #             Vm_t = V_mat[n1,l1,twoj1_idx,n2,l2,twoj2_idx,:,l4,twoj4_idx,:,l3,twoj3_idx]
 
-                antisym = np.allclose(Vm, -Vm_t)
-                if not antisym:
-                    print("n1, n2", n1, n2)
-                    print(Vm.shape)
-                    print(Vm_t.shape)
-                    all_antisyms = False
-        print("All antisym?", all_antisyms)
-
+        #             antisym = np.allclose(Vm, -Vm_t)
+        #             if not antisym:
+        #                 print("\nn1, n2", n1, n2)
+        #                 print("l1, l2, l3, l4", l1, l2, l3, l4)
+        #                 print("twoj1_idx, twoj2_idx, twoj3_idx, twoj4_idx", twoj1_idx, twoj2_idx, twoj3_idx, twoj4_idx)
+        #                 print(Vm)
+        #                 print(Vm_t)
+        #                 all_antisyms = False
+        # print("All antisym?", all_antisyms)
+        # exit()
 
         # Some checks on V_mat
         # Is it sym?
         all_sym = True
-        for n1 in range(self.n_level_max + 1):
-            for n2 in range(self.n_level_max + 1):
-                Vm = V_mat[n1,0,1,n2,0,1,:,0,1,:,0,1]
-                Vm2 = V_mat[:,0,1,:,0,1,n1,0,1,n2,0,1]
+        # for n1, n2 in product(range(self.n_level_max + 1), repeat=2):
+        #     for l1, l2, l3, l4 in product(range(self.l_level_max + 1), repeat=4):
+        #         for twoj1_idx, twoj2_idx, twoj3_idx, twoj4_idx in product(range(2), repeat=4):
+        #             Vm = V_mat[n1,l1,twoj1_idx, n2,l2,twoj2_idx, :,:,:,:,:,:]
+        #             Vm2 = V_mat[:,:,:,:,:,:, n1,l1,twoj1_idx, n2,l2,twoj2_idx]
 
-                sym = np.allclose(Vm, Vm2)
-                #print("V sym:", sym)
+        #             sym = np.allclose(Vm, Vm2)
+        #             #print("V sym:", sym)
 
-                if not sym:
-                    print("n1, n2", n1, n2)
-                    print(Vm.shape)
-                    print(Vm2.shape)
-                    all_sym = False
-        print("All sym?", all_sym)
+        #             if not sym:
+        #                 print("\nn1, n2", n1, n2)
+        #                 print("l1, l2, l3, l4", l1, l2, l3, l4)
+        #                 print("twoj1_idx, twoj2_idx, twoj3_idx, twoj4_idx", twoj1_idx, twoj2_idx, twoj3_idx, twoj4_idx)
+        #                 # print(Vm.shape)
+        #                 # print(Vm2.shape)
+        #                 # print(Vm[:,1,1:,0,1])
+        #                 # print(Vm2[:,1,1:,0,1])
+        #                 all_sym = False
+        #                 break
+
+        # print("All sym?", all_sym)
+        
+        # print("------------------ªªªªª------------------")
 
         # print(V_mat[0,0,1,1,0,1,:,0,1,:,0,1])
         # print(self.index_flattener(0,0,1,-1))
         # print(self.index_flattener(1,0,1,-1))
 
-        #exit()
+
+        
 
         return V_mat, V_non_asym
 
@@ -290,8 +322,10 @@ class System:
         
         if twoj > 2 * l + 1 or twoj < np.abs(2 * l - 1):
             raise ValueError("The value of twoj={} is not allowed for the given value of l={}".format(twoj, l))
-        if np.abs(twom) > twoj or (twoj - twom) % 2 != 0:
-            raise ValueError("The value of twom={} is not allowed for the given value of twoj={}".format(twom, twoj))
+        
+        if twom:
+            if np.abs(twom) > twoj or (twoj - twom) % 2 != 0:
+                raise ValueError("The value of twom={} is not allowed for the given value of twoj={}".format(twom, twoj))
 
         idx = 0
         for n_p in range(n + 1):
@@ -304,15 +338,20 @@ class System:
 
             for lp in range(lp_max + 1):
                 for twojp in range(np.abs(2 * lp - 1), 2 * lp + 2, 2):
-                    for twomp in range(-twojp, twojp + 1, 2):
-                        if n_p == n and lp == l and twojp == twoj and twomp == twom:
+                    if not twom:
+                        if n_p == n and lp == l and twojp == twoj:
                             return idx
                         idx += 1
+                    else:
+                        for twomp in range(-twojp, twojp + 1, 2):
+                            if n_p == n and lp == l and twojp == twoj and twomp == twom:
+                                return idx
+                            idx += 1
         
         raise ValueError("Something went wrong")
 
     
-    def index_unflattener(self, idx):
+    def index_unflattener(self, idx, include_m):
         idxp = 0
         for n_p in range(self.n_level_max + 1):
             Nep_min = 2 * n_p
@@ -331,8 +370,9 @@ class System:
     # This is probably mega-slow for larger systems and will need to be numbad. Indeed.
     # TODO: Does this need any extra info on how to treat the ms? Does adding m_diagonal even make sense?
     # Make sure the chipmunks don't eat the hamiltonian
-    def matrix_ndflatten(self, matrix, dim=2, m_diagonal=False, asym=False):
-        shape_tuple = (self.num_states,) * dim
+    def matrix_ndflatten(self, matrix, dim=2, include_m=False, m_diagonal=False, asym=False):
+        shape = self.num_j_states if not include_m else self.num_states
+        shape_tuple = (shape,) * dim
         flat_matrix = np.zeros(shape_tuple)
 
         it = np.nditer(matrix, flags=['multi_index', 'refs_ok'])
@@ -341,9 +381,9 @@ class System:
         idx = np.zeros(dim, dtype=int)
 
         for el in it:
-            for d in range(dim):
-                n[d], l[d], twoj_idx[d] = it.multi_index[d * 3 : (d + 1) * 3]
-                twoj[d] = 2 * l[d] - 1 + twoj_idx[d] * 2
+            for i in range(dim):
+                n[i], l[i], twoj_idx[i] = it.multi_index[i * 3 : (i + 1) * 3]
+                twoj[i] = 2 * l[i] - 1 + twoj_idx[i] * 2
 
             # Special unphysical case: FIXME
             if np.any(twoj < 0):
@@ -353,29 +393,32 @@ class System:
                 # print("Skipping", n, l, twoj)
                 # print("Value", el)
                 continue
+            
+            if include_m:
+                for twom in product(*[range(-twoj[d], twoj[d] + 1, 2) for d in range(dim)]):
+                    for i in range(dim):
+                        idx[i] = self.index_flattener(n[i], l[i], twoj[i], twom[i])
 
-            for twom in product(*[range(-twoj[d], twoj[d] + 1, 2) for d in range(dim)]):
+                    non_zero = True
+                    if m_diagonal:
+                        m1 = twom[0:dim // 2]
+                        m2 = twom[dim // 2:]
+                        if asym:
+                            if m1 != m2 and m1 != m2[::-1]:
+                                # print(twom, m1, m2)
+                                non_zero = False
+                        else:
+                            if m1 != m2:
+                                non_zero = False
+
+                    if not non_zero:
+                        flat_matrix[tuple(idx)] = 0
+                        continue
+
+                    flat_matrix[tuple(idx)] = el
+            else:
                 for i in range(dim):
-                    idx[i] = self.index_flattener(n[i], l[i], twoj[i], twom[i])
-
-                non_zero = True
-                if m_diagonal:
-                    # TODO: this should be changed if the matrix you are flattening is not antysymmetrized in the last two indices
-                    m1 = twom[0:dim // 2]
-                    m2 = twom[dim // 2:]
-                    if asym:
-                        if m1 != m2 and m1 != m2[::-1]:
-                            # print(twom, m1, m2)
-                            non_zero = False
-                    else:
-                        if m1 != m2:
-                            non_zero = False
-
-                if not non_zero:
-                    flat_matrix[tuple(idx)] = 0
-                    continue
-
-                flat_matrix[tuple(idx)] = el
+                    idx[i] = self.index_flattener(n[i], l[i], twoj[i], None)
         
         return flat_matrix
 

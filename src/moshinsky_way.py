@@ -59,17 +59,18 @@ def central_potential_ls_coupling_basis_matrix_element(cp_red_matrix, moshinsky_
     Nq_34 = 2 * n3 + l3 + 2 * n4 + l4 # (I think we just have to consider Nq_12...)
     Nq_lim = Nq_12 # max(Nq_12, Nq_34) # THIS IS NOT Nq_max!!! (the parameter in the function that calls this one, to fill the matrix)
 
-    # TODO: fix the l limits (they can actually reach Nq_lim)
+
     mat_el = 0
-    for small_n in prange(Nq_lim // 2 + 1):
+    for small_n in prange(Nq_12 // 2 + 1):
+        small_n_prime = int(small_n + n3 - n1 + n4 - n2 + 0.5 * (l3 + l4 - l1 - l2))
+        # n' cannot be negative (i.e., if it comes out negative the energy conservation conditions cannot be satisfied)
+        if small_n_prime < 0:
+            continue
+
         for small_l in prange(Nq_lim - 2*small_n + 1):
             for big_N in prange(Nq_lim - 2*small_n - small_l + 1):
                 for big_L in prange(Nq_lim - 2*small_n - small_l - 2*big_N + 1):
                     
-                    small_n_prime = int(small_n + n3 - n1 + n4 - n2 + 0.5 * (l3 + l4 - l1 - l2))
-                    # n' cannot be negative (i.e., if it comes out negative the energy conservation conditions cannot be satisfied)
-                    if small_n_prime < 0:
-                        continue
 
                     # Conditions for Moshinsky bracket to be non-zero 
                     # Also guarantees conservation of parity: (-1)^(l1+l2) = (-1)^(l+L)
@@ -105,14 +106,14 @@ def central_potential_J_coupling_matrix_element(cp_ls_matrix, wigner_9j_dict, n1
     twos1, twos2, twos3, twos4 = 1, 1, 1, 1
 
     # We have included the spin and parity selectors in case we are dealing with a projector in the potential
-    if parity_selector == "odd": # Select the odd parity states
-        if (l3 + l4) % 2 == 0:
-            return 0.
-    elif parity_selector == "even": # Select the even parity states
-        if (l3 + l4) % 2 == 1:
-            return 0.
+    # if parity_selector == "odd": # Select the odd parity states
+    #     if (l3 + l4) % 2 == 0:
+    #         return 0.
+    # elif parity_selector == "even": # Select the even parity states
+    #     if (l3 + l4) % 2 == 1:
+    #         return 0.
 
-    # TODO: check that the lambda is correct
+    # TODO: check that the lambda is correct. Can you also have 2J, 2J'? 
     # Note: in the matrix elements you are asking for, l1=l3, l2=l4, and therefore lambda' is redundant... OR IS IT??
     # In any case, for now...
     if l1 != l3 or l2 != l4:
@@ -132,21 +133,19 @@ def central_potential_J_coupling_matrix_element(cp_ls_matrix, wigner_9j_dict, n1
 
                 ls_el = cp_ls_matrix[n1, l1, n2, l2, n3, l3, n4, l4, lamb]
 
-                try:
-                    # wigner_one_old = wigner_9j(l1, twos1/2, twoj1/2, l2, twos2/2, twoj2/2, lamb, twoS/2, twoJ/2, prec=64)
-                    # wigner_two_old = wigner_9j(l3, twos3/2, twoj3/2, l4, twos4/2, twoj4/2, lamb, twoS_prime/2, twoJ/2, prec=64)
-                    wigner_one = wigner_9j_dict[(2*l1, twos1, twoj1, 2*l2, twos2, twoj2, 2*lamb, twoS, twoJ)]
-                    wigner_two = wigner_9j_dict[(2*l3, twos3, twoj3, 2*l4, twos4, twoj4, 2*lamb, twoS_prime, twoJ)]
+                # try:
+                #     # wigner_one_old = wigner_9j(l1, twos1/2, twoj1/2, l2, twos2/2, twoj2/2, lamb, twoS/2, twoJ/2, prec=64)
+                #     # wigner_two_old = wigner_9j(l3, twos3/2, twoj3/2, l4, twos4/2, twoj4/2, lamb, twoS_prime/2, twoJ/2, prec=64)
+                # except ValueError:
+                #     continue
 
-                except ValueError:
-                    continue
+                wigner_one = wigner_9j_dict[(2*l1, twos1, twoj1, 2*l2, twos2, twoj2, 2*lamb, twoS, twoJ)]
+                wigner_two = wigner_9j_dict[(2*l3, twos3, twoj3, 2*l4, twos4, twoj4, 2*lamb, twoS_prime, twoJ)]
 
                 if wigner_one == 0 or wigner_two == 0:
                     continue
-                if wigner_one is np.nan or wigner_two is np.nan:
-                    continue
 
-                sqrt_one = np.sqrt((twoj1 + 1) *(twoj2 + 1) * (2*lamb + 1) * (twoS + 1))
+                sqrt_one = np.sqrt((twoj1 + 1) * (twoj2 + 1) * (2*lamb + 1) * (twoS + 1))
                 sqrt_two = np.sqrt((twoj3 + 1) * (twoj4 + 1) * (2*lamb + 1) * (twoS_prime + 1))
 
                 mat_el += ls_el * wigner_one * wigner_two * sqrt_one * sqrt_two
@@ -157,6 +156,7 @@ def central_potential_J_coupling_matrix_element(cp_ls_matrix, wigner_9j_dict, n1
 # ----------------------------------------------------------------------------------------------
 # BELOW: Functions to set the matrices. This explains the restrictions to l, l'. The above functions are general and should
 # work for any l1, l2, l3, l4.
+# This is weird... maybe you are wrong about these matrices being diagonal in l, l'
 
 
 def set_wavefunctions(Ne_max, l_max, hbar_omega, mass, integration_limit, integration_steps):
@@ -281,6 +281,7 @@ def set_central_potential_J_coupling_basis_matrix(cp_ls_coupling_matrix, wigner_
     return central_potential_J_coupling_basis_matrix
 
 # TODO: include the "spin deltas" What??
+# TODO: Make sure that no indices are repeating themselves!!!
 @njit(float64[:,:,:,:,:,:,:,:,:,:,:,:](float64[:,:,:,:,:,:,:,:,:,:,:,:,:], int64, int64), parallel=True, fastmath=True, cache=True)
 def set_central_potential_matrix(cp_J_coupling_matrix, Ne_max, l_max):
     ni_max = Ne_max // 2
@@ -304,7 +305,7 @@ def set_central_potential_matrix(cp_J_coupling_matrix, Ne_max, l_max):
                                         central_potential_basis_matrix[n1, l, twoj_idx, n2, l_prime, twoj_prime_idx, n3, l, twoj_idx, n4, l_prime, twoj_prime_idx] +=\
                                             cp_J_coupling_matrix[n1, l, twoj_idx, n2, l_prime, twoj_prime_idx, n3, l, twoj_idx, n4, l_prime, twoj_prime_idx, twoJ] *\
                                                 (twoJ + 1) / ((twoj + 1) * (twoj_prime + 1))
-    
+
     return central_potential_basis_matrix
 
 # This is horrible python code, I'm just trying to make it work with numba.

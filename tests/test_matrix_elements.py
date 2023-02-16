@@ -8,6 +8,7 @@ import sys
 sys.path.append('../src')
 
 import moshinsky_way as mw
+import helpers
 
 
 class TestMatrixElements(unittest.TestCase):
@@ -52,7 +53,7 @@ class TestMatrixElements(unittest.TestCase):
             self.assertTrue(np.isclose(el, math_results[i], atol=1e-5))
     
     def test_reduced_matrix_elements_symmetry(self):
-        # The reduced matrix elements should be symmetric
+        # The reduced matrix elements should be symmetric in the exchange of (n1, l1)<->(n2, l2)
         V0 = 200
         mu = 1.487
         qn_list = [(1,1,0,1), (1,1,1,0), (1,2,0,2), (2,5,3,1), (3,2,1,0), (1,2,3,4), (2,1,1,2), (2,0,2,1), (1,0,0,2)]
@@ -68,19 +69,14 @@ class TestMatrixElements(unittest.TestCase):
     
     # Test the ls coupling basis matrix elements
     def test_ls_coupling_matrix_elements_symmetry(self):
-        # The ls coupling matrix elements should be symmetric
-        # Set a random seed (it has to be consistent every time)
-        np.random.seed(11)
+        # The ls coupling matrix elements should be symmetric in the exchange of (n1, l1)<->(n2, l2)
 
         # Generate random quantum numbers
         sample_size = 30
-        qn_list_n = np.random.randint(0, self.Ne_max // 2 + 1, size=(sample_size, 4))
-        qn_list_Ne = np.random.randint(2* qn_list_n, self.Ne_max + 1, size=(sample_size, 4))
-        qn_list_l = qn_list_Ne - 2 * qn_list_n
-        qn_list = np.concatenate((qn_list_n, qn_list_l), axis=1)
+        qn_list, _ = helpers.random_quantum_number_generator(self.Ne_max, self.l_max, sample_size, set_size=4, seed=12)
 
         for qns in range(sample_size):
-            n1, n2, n3, n4, l1, l2, l3, l4 = qn_list[qns, :]
+            n1, n2, n3, n4, l1, l2, l3, l4, _, _, _, _ = qn_list[qns, :]
 
             lamb_max = min(l1 + l2, l3 + l4)
             lamb_min = max(abs(l1 - l2), abs(l3 - l4))
@@ -95,26 +91,16 @@ class TestMatrixElements(unittest.TestCase):
     
     # Test the J-basis matrix elements
     def test_J_basis_matrix_elements_symmetry(self):
-        # The ls coupling matrix elements should be symmetric
-        # Set a random seed (it has to be consistent every time)
-        np.random.seed(11)
+        # The J coupling matrix elements should be symmetric in the exchange of (n1, l1, j1)<->(n2, l2, j2)
 
         # Generate random quantum numbers
-        sample_size = 50
-        qn_list_n = np.random.randint(0, self.Ne_max // 2 + 1, size=(sample_size, 4))
-        qn_list_Ne = np.random.randint(2* qn_list_n, self.Ne_max + 1, size=(sample_size, 4))
-        qn_list_l = qn_list_Ne - 2 * qn_list_n
-        qn_list_twoj_idx = np.random.randint(0, 2, size=(sample_size, 4))
-
-        qn_list = np.concatenate((qn_list_n, qn_list_l, qn_list_twoj_idx), axis=1)
+        sample_size = 30
+        qn_list, _ = helpers.random_quantum_number_generator(self.Ne_max, self.l_max, sample_size, set_size=4, seed=12)
 
         for qns in range(sample_size):
-            n1, n2, n3, n4, l1, l2, l3, l4, twoj_idx1, twoj_idx2, twoj_idx3, twoj_idx4 = qn_list[qns, :]
+            n1, n2, n3, n4, l1, l2, _, _, twoj1, twoj2, _, _ = qn_list[qns, :]
             # Lazy approach (remember the structure of the matrix):
             l3, l4 = l1, l2
-
-            twoj1 = 2 * l1 - 1 + twoj_idx1 * 2 if l1 > 0 else 1
-            twoj2 = 2 * l2 - 1 + twoj_idx2 * 2 if l2 > 0 else 1
             twoj3, twoj4 = twoj1, twoj2
 
             selectors = product(["none", "singlet", "triplet"], ["none", "even", "odd"])
@@ -137,26 +123,13 @@ class TestMatrixElements(unittest.TestCase):
 
     def test_J_basis_matrix_elements_spin_selectors(self):
         # Spin selected matrix elements (singlet and triplet) should add up to the total matrix element
-
-        # Set a random seed (it has to be consistent every time)
-        np.random.seed(11)
-
-        # Generate random quantum numbers
-        sample_size = 50
-        qn_list_n = np.random.randint(0, self.Ne_max // 2 + 1, size=(sample_size, 4))
-        qn_list_Ne = np.random.randint(2* qn_list_n, self.Ne_max + 1, size=(sample_size, 4))
-        qn_list_l = qn_list_Ne - 2 * qn_list_n
-        qn_list_twoj_idx = np.random.randint(0, 2, size=(sample_size, 4))
-
-        qn_list = np.concatenate((qn_list_n, qn_list_l, qn_list_twoj_idx), axis=1)
+        sample_size = 30
+        qn_list, _ = helpers.random_quantum_number_generator(self.Ne_max, self.l_max, sample_size, set_size=4, seed=12)
 
         for qns in range(sample_size):
-            n1, n2, n3, n4, l1, l2, _, _, twoj_idx1, twoj_idx2, _, _ = qn_list[qns, :]
+            n1, n2, n3, n4, l1, l2, _, _, twoj1, twoj2, _, _ = qn_list[qns, :]
             # Lazy approach (remember the structure of the matrix):
             l3, l4 = l1, l2
-
-            twoj1 = 2 * l1 - 1 + twoj_idx1 * 2 if l1 > 0 else 1
-            twoj2 = 2 * l2 - 1 + twoj_idx2 * 2 if l2 > 0 else 1
             twoj3, twoj4 = twoj1, twoj2
 
             for twoJ in range(abs(twoj1 - twoj2), twoj1 + twoj2 + 1, 2):

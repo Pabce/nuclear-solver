@@ -3,7 +3,8 @@ import matplotlib.pyplot as plt
 from scipy.linalg import eigh
 from copy import deepcopy
 import time
-np.set_printoptions(precision=4, suppress=False, linewidth=200)
+from itertools import product
+np.set_printoptions(precision=4, suppress=True, linewidth=200)
 
 import full_minnesota_hf_system as hfs
 import full_minnesota_numba as hfs_numba
@@ -59,6 +60,7 @@ class Solver:
         V_matrix = hfs_numba.n_matrix_4dflatten(V_matrix_qn, True, True, self.num_states, self.system.Ne_max, self.l_level_max)
         print("Time to numba flatten V matrix:", time.time() - start)
         #V_matrix = np.zeros((self.num_states, self.num_states, self.num_states, self.num_states))
+        #V_matrix = V_non_asym
 
         #print(V_matrix[0,2,:,:])
         #print(t_matrix)
@@ -68,31 +70,31 @@ class Solver:
         print("T hermitian:", np.allclose(t_matrix, t_matrix.conj().T))
 
         # Is V_matrix symmetric under swaping (1,2)<->(3,4)?
-        all_V_sym = True
-        for n1 in range(self.num_states):
-            for n2 in range(self.num_states):
-                herm = np.allclose(V_matrix[n1,n2,:,:], V_matrix[:,:,n1,n2], atol=1e-8)
+        # all_V_sym = True
+        # for k1 in range(self.num_states):
+        #     for k2 in range(self.num_states):
+        #         herm = np.allclose(V_matrix[k1,k2,:,:], V_matrix[:,:,k1,k2], atol=1e-8)
 
-                if not herm:
-                    print("NOT SYMMETRIC UNDER (1,2)<->(3,4)! n1, n2:", n1, n2)
-                    print(V_matrix[n1,n2,:,:] - V_matrix[:,:,n1,n2])
-                    #print(V_matrix[:,:,n1,n2])
-                    all_V_sym = False
+        #         if not herm:
+        #             print("NOT SYMMETRIC UNDER (1,2)<->(3,4)! k1, k2:", k1, k2)
+        #             print(V_matrix[k1,k2,:,:] - V_matrix[:,:,k1,k2])
+        #             #print(V_matrix[:,:,n1,n2])
+        #             all_V_sym = False
 
-        print("V symmetric under (1,2)<->(3,4):", all_V_sym)
+        # print("V symmetric under (1,2)<->(3,4):", all_V_sym)
 
         # Is V_matrix antisymmetric in the last two indices?
         all_V_antisym = True
-        for n1 in range(self.num_states):
-            for n2 in range(self.num_states):
-                antisym = np.allclose(V_matrix[n1,n2,:,:], -V_matrix[n1,n2,:,:].T, atol=1e-8)
+        for k1 in range(self.num_states):
+            for k2 in range(self.num_states):
+                antisym = np.allclose(V_matrix[k1,k2,:,:], -V_matrix[k1,k2,:,:].T, atol=1e-8)
 
                 if not antisym:
-                    print("NOT ASYM! n1, n2:", n1, n2)
-                    print(system.index_unflattener(n1), system.index_unflattener(n2))
+                    print("NOT ASYM! n1, n2:", k1, k2)
+                    print(system.index_unflattener(k1), system.index_unflattener(k2))
                     print(system.index_unflattener(1), system.index_unflattener(0))
                     #print(V_matrix[n1,n2,:,:] + V_matrix[n1,n2,:,:].T)
-                    print(V_matrix[n1,n2,:,:])
+                    print(V_matrix[k1,k2,:,:])
                     #print(-V_matrix[n1,n2,:,:].T)
                     all_V_antisym = False
         
@@ -118,22 +120,88 @@ class Solver:
             print("RHO equal to RHO^2:", np.allclose(rho, np.dot(rho, rho)))
             # Is rho hermitian?
             print("RHO hermitian:", np.allclose(rho, rho.conj().T))
-            # Is rho diagonal in m? (should it be???) (In any case, fix this for l!=0)
-            print("RHO diagonal in m:", np.allclose(rho[0::2, 1::2], 0, atol=1e-10))
+            
+            # TODO: make sure rho is diagonal in l, j!
+            rho_diag_l, rho_diag_lj, rho_diag_ljm = True, True, True
+            D_diag_l, D_diag_lj, D_diag_ljm = True, True, True
+            hamiltonian_diag_l, hamiltonian_diag_lj, hamiltonian_diag_ljm = True, True, True
+            for k1 in range(self.num_states):
+                for k2 in range(self.num_states):
+                    n1, l1, twoj1, twom1 = system.index_unflattener(k1)
+                    n2, l2, twoj2, twom2 = system.index_unflattener(k2)
+
+                    if l1 != l2:
+                        if not np.allclose(rho[k1, k2], 0):
+                            print(rho[k1, k2])
+                            # print("RHO NOT DIAGONAL IN L! k1, k2:", k1, k2)
+                            # print(system.index_unflattener(k1), system.index_unflattener(k2))
+                            rho_diag_l = False
+                        if not np.allclose(D[k1, k2], 0):
+                            # print("D NOT DIAGONAL IN L! k1, k2:", k1, k2)
+                            # print(D[k1, k2])
+                            # print(system.index_unflattener(k1), system.index_unflattener(k2))
+                            D_diag_l = False
+                        if not np.allclose(hamiltonian[k1, k2], 0):
+                            # print("HAMILTONIAN NOT DIAGONAL IN L! k1, k2:", k1, k2)
+                            # print(system.index_unflattener(k1), system.index_unflattener(k2))
+                            hamiltonian_diag_l = False
+                    
+                    elif twoj1 != twoj2:
+                        if not np.allclose(rho[k1, k2], 0):
+                            rho_diag_lj = False
+                        if not np.allclose(D[k1, k2], 0):
+                            D_diag_lj = False
+                        if not np.allclose(hamiltonian[k1, k2], 0):
+                            hamiltonian_diag_lj = False
+                    
+                    elif twom1 != twom2:
+                        if not np.allclose(rho[k1, k2], 0):
+                            rho_diag_ljm = False
+                        if not np.allclose(D[k1, k2], 0):
+                            D_diag_ljm = False
+                        if not np.allclose(hamiltonian[k1, k2], 0):
+                            hamiltonian_diag_ljm = False
+                    
+                    # if twoj1 != twoj2:
+                    #     print(rho[k1, k2] == 0)
+
+            print("RHO diagonal in l:", rho_diag_l)
+            print("RHO diagonal in l, j:", rho_diag_lj)
+            print("RHO diagonal in l, j, m:", rho_diag_ljm)
+            print("D diagonal in l:", D_diag_l)
+            print("D diagonal in l, j:", D_diag_lj)
+            print("D diagonal in l, j, m:", D_diag_ljm)
+            print("Hamiltonian diagonal in l:", hamiltonian_diag_l)
+            print("Hamiltonian diagonal in l, j:", hamiltonian_diag_lj)
+            print("Hamiltonian diagonal in l, j, m:", hamiltonian_diag_ljm)
+
+
+            # print(D)
+            print("RHO\n", rho)
+            print(hamiltonian)
+
+            #print(D[0:8, 0:8])
+            # print(rho[-8:, -8:])
+
+            if not D_diag_l:
+                exit()
+
             # Is D unitary?
             print("D unitary:", np.allclose(np.dot(D, D.conj().T), np.eye(self.num_states)))
             # Is the hamiltonian hermitian?
             print("H hermitian:", np.allclose(hamiltonian, hamiltonian.conj().T))
 
-            # Print...
-            # print("HAMILTONIAN")
-            # print(np.matrix(hamiltonian))
-
-
             # Diagonalize the single-particle hamiltonian
             sp_energies, eigenvectors = eigh(hamiltonian)
+
+            #print("spe1", np.dot(hamiltonian, eigenvectors[:, 0]), eigenvectors[:, 0])
+
+            # hr = hamiltonian[::2, ::2]
+            # print(hamiltonian)
+            # print(hr)
+            # print(eigh(hr)[1])
             # Order the eigenvectors by energy (I think this is not necessary, but it's good to be sure)
-            eigenvectors = eigenvectors[:, np.argsort(sp_energies)]
+            #eigenvectors = eigenvectors[:, np.argsort(sp_energies)]
 
             # Stop iterating if difference between previous energies is smaller than tolerance
             norm = np.linalg.norm(sp_energies - sp_energies_prev) / self.num_states
@@ -172,16 +240,23 @@ class Solver:
         return rho
 
     # Return the single particle hamiltonian
-    @staticmethod
-    def get_hamiltonian(t_matrix, V_matrix, rho):
+    
+    def get_hamiltonian(self, t_matrix, V_matrix, rho):
         # There is a conflict between the notes and the PDF -> not sure if contraction is over indices 2, 4 or 4, 2...
         # Gamma is a contraction over mu, sigma of: V_alpha,sigma,beta,mu * rho_mu,sigma
-        gamma = np.einsum('abcd,bd->ac', V_matrix, rho)
+        gamma = np.einsum('abcd,db->ac', V_matrix, rho)
+
+        # for k1, k2 in product(range(t_matrix.shape[0]), range(t_matrix.shape[1])):
+        #     print(k1, k2)
+        #     print(self.system.index_unflattener(k1), self.system.index_unflattener(k2))
+        #     print(V_matrix[k1, :, k2, :])
 
         # Are t and gamma hermitian?
         print("Gamma hermitian:", np.allclose(gamma, gamma.conj().T))
-        # print("GAMMA")
-        # print(gamma)
+        print("Gamma all zeros?:", np.allclose(gamma, 0))
+        
+        print("GAMMA")
+        print(gamma)
 
         #print(V_matrix[0,0,:,:])
 
@@ -248,9 +323,9 @@ class Solver:
 
 if __name__ == "__main__":
 
-    system = hfs.System(Ne_max=8, l_max=0, hbar_omega=10, mass=939)
+    system = hfs.System(Ne_max=2, l_max=1, hbar_omega=10, mass=939)
     print("asdfsa")
-    solver = Solver(system, num_particles=8)
+    solver = Solver(system, num_particles=2)
 
     print("Number of states:", system.num_states)
 
