@@ -9,6 +9,9 @@ np.set_printoptions(precision=4, suppress=True, linewidth=200)
 import full_minnesota_hf_system as hfs
 import full_minnesota_numba as hfs_numba
 import hf_numba_helpers
+import sys
+sys.path.append('../tests')
+import on_the_fly # type: ignore
 
 
 class Solver:
@@ -19,7 +22,11 @@ class Solver:
         # Class containing the model information
         self.system = system
 
-        self.num_states, self.n_level_max, self.l_level_max = system.num_states, system.n_level_max, system.l_level_max
+        self.include_m = system.include_m
+        self.num_states, self.true_num_states, self.n_level_max, self.l_level_max =\
+              system.num_states, system.true_num_states, system.n_level_max, system.l_level_max
+        
+        self.occupation_matrix = self.get_occupation_matrix()
 
         # Pick the hole states as those with the lowest energies
         self.original_energies, self.original_energies_flat, self.original_quantum_numbers =\
@@ -45,22 +52,68 @@ class Solver:
         # Same structure as h
         D = np.eye(self.num_states)
         prev_D = deepcopy(D)
+        rho_prev = np.diag(self.occupation_matrix)
 
         # First, get 1-body and 2-body matrix elements in the original basis (only need to do this once!)
-        t_matrix = self.system.matrix_ndflatten(self.system.get_one_body_matrix_elements(), dim=2, m_diagonal=True)
-        V_matrix_qn, V_non_asym_qn = self.system.get_two_body_matrix_elements()
+        t_matrix = self.system.matrix_ndflatten(self.system.get_one_body_matrix_elements(), dim=2, include_m=self.include_m, m_diagonal=True)
+        V_matrix_qn, V_non_asym_qn, self.cp_J_mats = self.system.get_two_body_matrix_elements_2()
 
         # start = time.time()
-        # #V_non_asym_1 = -self.system.matrix_ndflatten(V_non_asym_qn, dim=4, m_diagonal=True, asym=True)
-        # V_matrix_1 = self.system.matrix_ndflatten(V_matrix_qn, dim=4, m_diagonal=True, asym=True)
+        # V_non_asym = self.system.matrix_ndflatten(V_non_asym_qn, dim=4, include_m=self.include_m, m_diagonal=True, asym=True)
+        # V_matrix = self.system.matrix_ndflatten(V_matrix_qn, dim=4, include_m=self.include_m, m_diagonal=True, asym=True)
         # print("Time to flatten V matrix:", time.time() - start)
 
         start = time.time()
-        V_non_asym = hfs_numba.n_matrix_4dflatten(V_non_asym_qn, True, False, self.num_states, self.system.Ne_max, self.l_level_max)
-        V_matrix = hfs_numba.n_matrix_4dflatten(V_matrix_qn, True, True, self.num_states, self.system.Ne_max, self.l_level_max)
+        V_non_asym = hfs_numba.n_matrix_4dflatten(V_non_asym_qn, False, False, False, self.num_states, self.system.Ne_max, self.l_level_max)
+        V_matrix = hfs_numba.n_matrix_4dflatten(V_matrix_qn, False, False, False, self.num_states, self.system.Ne_max, self.l_level_max)
         print("Time to numba flatten V matrix:", time.time() - start)
+        # print("ASDSDAD", np.allclose(V_matrix, V_matrix_2))
+        # exit()
+
         #V_matrix = np.zeros((self.num_states, self.num_states, self.num_states, self.num_states))
         #V_matrix = V_non_asym
+
+        # V_matrix_2 = V_non_asym - V_non_asym.transpose(0, 1, 3, 2)
+        # print("ASDSDAD", np.allclose(V_matrix, V_matrix_2))
+
+        # TESTS:
+        # for b in range(3):
+        #     print(V_matrix[0, b, :, b])
+        #     # print(V_matrix[:, b, 0, b])
+        #     # print(V_non_asym[0, b, :, b])
+        #     # print(V_non_asym[:, b, 0, b])
+
+        #     self.system.index_unflattener(b)
+        #     n1, l1, twoj1 = self.system.index_unflattener(0)
+        #     n2, l2, twoj2 = self.system.index_unflattener(b)
+        #     n4, l4, twoj4 = self.system.index_unflattener(b)
+        #     twoj1_idx = 0 if twoj1 < 2*l1 else 1
+        #     twoj2_idx = 0 if twoj2 < 2*l2 else 1
+        #     twoj4_idx = 0 if twoj4 < 2*l4 else 1
+
+        #     for k in range(self.num_states):
+        #         if k==b:
+        #             continue
+
+        #         n3, l3, twoj3 = self.system.index_unflattener(k)
+        #         twoj3_idx = 0 if twoj3 < 2*l3 else 1
+
+        #         print("n1, l1, twoj1:", n1, l1, twoj1)
+        #         print("n2, l2, twoj2:", n2, l2, twoj2) 
+        #         print("n3, l3, twoj3:", n3, l3, twoj3) 
+        #         print(V_matrix[0, b, k, b])
+        #         print(V_matrix_qn[n1, l1, twoj1_idx, n2, l2, twoj2_idx, n3, l3, twoj3_idx, n4, l4, twoj4_idx])
+        #         # print(V_non_asym[0, b, k, b])
+        #         # print(V_non_asym_qn[n1, l1, twoj1_idx, n2, l2, twoj2_idx, n3, l3, twoj3_idx, n4, l4, twoj4_idx])
+        #         # print(V_non_asym_qn[n1, l1, twoj1_idx, n2, l2, twoj2_idx, n4, l4, twoj4_idx, n3, l3, twoj3_idx])
+        #         for twoJ in range(0, twoj2 + 1):
+        #             print("twoJ:", twoJ)
+        #             print(self.cp_J_mats[0][n1, l1, twoj1_idx, n2, l2, twoj2_idx, n3, l3, twoj3_idx, n4, l4, twoj4_idx, twoJ])
+        #             print(self.cp_J_mats[0][n1, l1, twoj1_idx, n2, l2, twoj2_idx, n4, l4, twoj4_idx, n3, l3, twoj3_idx, twoJ])
+        #             print(self.cp_J_mats[0][n4, l4, twoj4_idx, n3, l3, twoj3_idx, n1, l1, twoj1_idx, n2, l2, twoj2_idx, twoJ])
+        
+        # exit()
+
 
         #print(V_matrix[0,2,:,:])
         #print(t_matrix)
@@ -100,131 +153,89 @@ class Solver:
         
         print("V antisymmetric in the exchange of last two indices:", all_V_antisym)
 
-        # TODO: We want to reorder our matrices so that the hole states are first (maybe we don't actually need this)
-
+        # --------------------------------------------------------------------------------------------
+        
+        # Iteration of the Hartree-Fock method
         print("ORIGINAL HO ENERGIES:", sp_energies_flat)
         print("HO QUANTUM NUMBERS:", quantum_numbers)
         for i in range(max_iterations):
             print('-----------------------------------')
             print("Iteration", i + 1)
 
-            # Construct the density matrix in the original basis (in the first iteration, it will be non-zero only for the hole states)
-            rho = self.get_density_matrix(D)
+            # Construct the density matrix in the original basis 
+            # (in the first iteration, it will be non-zero only for the hole states)
+            # We can mix the density matrix from the previous iteration with the current one
+            rho = self.get_density_matrix(D) * (1 - mixture) + rho_prev * mixture
+            rho_prev = deepcopy(rho)
 
             # Construct the single-particle hamiltonian in the original basis
             hamiltonian = self.get_hamiltonian(t_matrix, V_matrix, rho)
-            #print(hamiltonian)
+            gamma = hamiltonian - t_matrix
 
-            # TESTS:
-            # Is rho equal to its sqaure?
-            print("RHO equal to RHO^2:", np.allclose(rho, np.dot(rho, rho)))
-            # Is rho hermitian?
-            print("RHO hermitian:", np.allclose(rho, rho.conj().T))
-            
-            # TODO: make sure rho is diagonal in l, j!
-            rho_diag_l, rho_diag_lj, rho_diag_ljm = True, True, True
-            D_diag_l, D_diag_lj, D_diag_ljm = True, True, True
-            hamiltonian_diag_l, hamiltonian_diag_lj, hamiltonian_diag_ljm = True, True, True
-            for k1 in range(self.num_states):
-                for k2 in range(self.num_states):
-                    n1, l1, twoj1, twom1 = system.index_unflattener(k1)
-                    n2, l2, twoj2, twom2 = system.index_unflattener(k2)
-
-                    if l1 != l2:
-                        if not np.allclose(rho[k1, k2], 0):
-                            print(rho[k1, k2])
-                            # print("RHO NOT DIAGONAL IN L! k1, k2:", k1, k2)
-                            # print(system.index_unflattener(k1), system.index_unflattener(k2))
-                            rho_diag_l = False
-                        if not np.allclose(D[k1, k2], 0):
-                            # print("D NOT DIAGONAL IN L! k1, k2:", k1, k2)
-                            # print(D[k1, k2])
-                            # print(system.index_unflattener(k1), system.index_unflattener(k2))
-                            D_diag_l = False
-                        if not np.allclose(hamiltonian[k1, k2], 0):
-                            # print("HAMILTONIAN NOT DIAGONAL IN L! k1, k2:", k1, k2)
-                            # print(system.index_unflattener(k1), system.index_unflattener(k2))
-                            hamiltonian_diag_l = False
-                    
-                    elif twoj1 != twoj2:
-                        if not np.allclose(rho[k1, k2], 0):
-                            rho_diag_lj = False
-                        if not np.allclose(D[k1, k2], 0):
-                            D_diag_lj = False
-                        if not np.allclose(hamiltonian[k1, k2], 0):
-                            hamiltonian_diag_lj = False
-                    
-                    elif twom1 != twom2:
-                        if not np.allclose(rho[k1, k2], 0):
-                            rho_diag_ljm = False
-                        if not np.allclose(D[k1, k2], 0):
-                            D_diag_ljm = False
-                        if not np.allclose(hamiltonian[k1, k2], 0):
-                            hamiltonian_diag_ljm = False
-                    
-                    # if twoj1 != twoj2:
-                    #     print(rho[k1, k2] == 0)
-
-            print("RHO diagonal in l:", rho_diag_l)
-            print("RHO diagonal in l, j:", rho_diag_lj)
-            print("RHO diagonal in l, j, m:", rho_diag_ljm)
-            print("D diagonal in l:", D_diag_l)
-            print("D diagonal in l, j:", D_diag_lj)
-            print("D diagonal in l, j, m:", D_diag_ljm)
-            print("Hamiltonian diagonal in l:", hamiltonian_diag_l)
-            print("Hamiltonian diagonal in l, j:", hamiltonian_diag_lj)
-            print("Hamiltonian diagonal in l, j, m:", hamiltonian_diag_ljm)
+            # Tests:
+            on_the_fly.test_run_matrices(self.system, rho=rho, D=D, hamiltonian=hamiltonian, gamma=gamma, include_m=self.include_m)
 
 
-            # print(D)
-            print("RHO\n", rho)
-            print(hamiltonian)
+            #print(self.occupation_matrix)
+            # print("D\n", D[:6, :6])
+            print("RHO\n", rho[:6, :6])
+            # print("Hamiltonian\n", hamiltonian[:6, :6])
 
             #print(D[0:8, 0:8])
             # print(rho[-8:, -8:])
 
-            if not D_diag_l:
-                exit()
 
-            # Is D unitary?
-            print("D unitary:", np.allclose(np.dot(D, D.conj().T), np.eye(self.num_states)))
-            # Is the hamiltonian hermitian?
-            print("H hermitian:", np.allclose(hamiltonian, hamiltonian.conj().T))
-
-            # Diagonalize the single-particle hamiltonian
+            # Numerical stabilization: 
+            # 1. the hamiltonian will slowly lose hermiticity due to numerical error. Here we restore it
+            hamiltonian_new = (hamiltonian + hamiltonian.conj().T) / 2
+            # Make sure the correction is small
+            herm_correction = np.linalg.norm(hamiltonian_new - hamiltonian)
+            print("H hermiticity correction:", herm_correction)
+            if herm_correction > 1e-8 * hamiltonian.size:
+                print("H hermiticity correction too large!")
+                #exit()
+            hamiltonian = hamiltonian_new
+            
+            
+            # Diagonalize the single-particle hamiltonian (automatically ordered by energy)
             sp_energies, eigenvectors = eigh(hamiltonian)
-
             #print("spe1", np.dot(hamiltonian, eigenvectors[:, 0]), eigenvectors[:, 0])
-
-            # hr = hamiltonian[::2, ::2]
-            # print(hamiltonian)
-            # print(hr)
-            # print(eigh(hr)[1])
-            # Order the eigenvectors by energy (I think this is not necessary, but it's good to be sure)
-            #eigenvectors = eigenvectors[:, np.argsort(sp_energies)]
+        
 
             # Stop iterating if difference between previous energies is smaller than tolerance
             norm = np.linalg.norm(sp_energies - sp_energies_prev) / self.num_states
-            if norm < tolerance:
+            if norm < tolerance or i == max_iterations - 1:
                 print("")
                 print("~~~~~~~~~~~~~~~~~~~~~~ FULL SOLVER ~~~~~~~~~~~~~~~~~~~~~~~~")
                 print("----------------------------------------------")
-                print("Convergence reached after {} iterations".format(i + 1))
-                print("Single particle energies: {}".format(sp_energies))
+                if norm < tolerance:
+                    print("Convergence reached after {} iterations".format(i + 1))
+                    print("Single particle energies: {}".format(sp_energies))
+                else:
+                    print("NO CONVERGENCE AFTER: {} iterations".format(max_iterations))
+                    print("Single particle energies: {}".format(sp_energies))
+
                 print("NORM", norm)
-                hf_energy = self.compute_hf_energy(sp_energies, t_matrix, V_matrix, V_non_asym, rho, D, self.num_particles)
+                full_sp_energies = self.get_full_sp_energies(sp_energies)
+                hf_energy = self.compute_hf_energy(sp_energies, full_sp_energies, t_matrix, V_matrix, V_non_asym, rho,
+                                                     D, self.num_particles, self.occupation_matrix)
                 return hf_energy, sp_energies, eigenvectors
             
             # Update the previous energies and the D matrix
             sp_energies_prev = deepcopy(sp_energies)
-            D = eigenvectors * (1 - mixture) + prev_D * mixture
+            
+            #print(eigenvectors[:6, :6])
+            D = eigenvectors
             prev_D = deepcopy(D)
 
-            print(sp_energies)
+            #print(np.dot(D, D.T.conj())[:6, :6])
+
+            print("Sp_energies:", sp_energies)
+            #print("Full sp energies:", self.get_full_sp_energies(sp_energies))
 
         # If we get here, we have reached the maximum number of iterations
         print("No convergence reached after {} iterations".format(max_iterations))
-        return -1 
+        return None, None, None
 
 
     def get_density_matrix(self, D):
@@ -233,9 +244,13 @@ class Solver:
         # (where i runs over the hole states, i.e., up to the number of particles)
         # So we can write:
 
-        trunc_D = D[:, :self.num_particles]
-        trunc_D_dagger = trunc_D.conj().T
-        rho = np.dot(trunc_D, trunc_D_dagger)
+        if self.include_m:
+            trunc_D = D[:, :self.num_particles]
+            trunc_D_dagger = trunc_D.conj().T
+            rho = np.dot(trunc_D, trunc_D_dagger)
+
+        D_dagger = D.conj().T
+        rho = np.einsum('ab,bc,b->ac', D, D_dagger, self.occupation_matrix)
 
         return rho
 
@@ -246,29 +261,111 @@ class Solver:
         # Gamma is a contraction over mu, sigma of: V_alpha,sigma,beta,mu * rho_mu,sigma
         gamma = np.einsum('abcd,db->ac', V_matrix, rho)
 
-        # for k1, k2 in product(range(t_matrix.shape[0]), range(t_matrix.shape[1])):
-        #     print(k1, k2)
-        #     print(self.system.index_unflattener(k1), self.system.index_unflattener(k2))
-        #     print(V_matrix[k1, :, k2, :])
+        # Tester:
+        # raw_V, rawV_na, _ = self.system.get_two_body_matrix_elements()
 
-        # Are t and gamma hermitian?
-        print("Gamma hermitian:", np.allclose(gamma, gamma.conj().T))
-        print("Gamma all zeros?:", np.allclose(gamma, 0))
+        # gamma_t = np.zeros((self.num_states, self.num_states))
+        # for k1 in range(self.num_states):
+        #     for k2 in range(self.num_states):
+        #         for mu in range(self.num_states):
+        #             for sigma in range(self.num_states):
+        #                 n1, l1, twoj1 = self.system.index_unflattener(k1)
+        #                 n2, l2, twoj2 = self.system.index_unflattener(sigma)
+        #                 n3, l3, twoj3 = self.system.index_unflattener(k2)
+        #                 n4, l4, twoj4 = self.system.index_unflattener(mu)
+        #                 twoj1_idx = 0 if twoj1 < 2*l1 else 1
+        #                 twoj2_idx = 0 if twoj2 < 2*l2 else 1
+        #                 twoj3_idx = 0 if twoj3 < 2*l3 else 1
+        #                 twoj4_idx = 0 if twoj4 < 2*l4 else 1
+
+        #                 if l1 != l2 or l3 != l4:
+        #                     continue
+        #                 elif twoj1 != twoj2 or twoj3 != twoj4:
+        #                     continue
+
+        #                 vmat = V_matrix[k1, sigma, k2, mu]
+        #                 gamma_t[k1, k2] += vmat * rho[mu, sigma]
+
+        #                 v_val = raw_V[n1, l1, twoj1_idx, n2, l2, twoj2_idx, n3, l3, twoj3_idx, n4, l4, twoj4_idx]
+
+        #                 if not np.isclose(v_val, vmat):
+        #                     print("SDADSD. Raw, Flattened", v_val, vmat)
+                        # l, l_prime = l1, l3
+                        # twoj, twoj_prime = twoj1, twoj3
+                        # twoj_idx, twoj_prime_idx = twoj1_idx, twoj3_idx
+                        
+                        # matel1 = 0
+                        # matel2 = 0
+                        # for twoJ in range(np.abs(twoj - twoj_prime), twoj + twoj_prime + 1, 2):
+                        #     matel1 += self.cp_J_mats[0][n1, l, twoj_idx, n2, l_prime, twoj_prime_idx, n3, l, twoj_idx, n4, l_prime, twoj_prime_idx, twoJ] *\
+                        #             (twoJ + 1) / ((twoj + 1) * (twoj_prime + 1))
+                        #     matel2 += self.cp_J_mats[0][n1, l, twoj_idx, n2, l_prime, twoj_prime_idx, n4, l_prime, twoj_prime_idx, n3, l, twoj_idx, twoJ] *\
+                        #             (twoJ + 1) / ((twoj + 1) * (twoj_prime + 1))
+                        # matel_asym = matel1 - matel2
+
+                        # if not np.isclose(matel_asym, vmat):
+                        #     print("LOLO", vmat, matel_asym)
+                        # elif matel_asym != 0:
+                        #     print("LILI", vmat, matel_asym)
+                        #     print(n1, l1, twoj1, n2, l2, twoj2, n3, l3, twoj3, n4, l4, twoj4)
+
+
+        #print("CONSGAM", np.allclose(gamma, gamma_t))
+        # exit()
         
-        print("GAMMA")
-        print(gamma)
+        # print("GAMMA")
+        # print(gamma)
 
-        #print(V_matrix[0,0,:,:])
 
         return t_matrix + gamma
+    
+
+    def get_occupation_matrix(self):
+        occ_matrix = np.zeros((self.num_states))
+        if not self.include_m:
+            count = 0
+            for k in range(self.num_states):
+                n, l, twoj = self.system.index_unflattener(k)
+                occ_j = twoj + 1
+                occ_matrix[k] = occ_j
+                count += occ_j
+
+                if count > self.num_particles:
+                    occ_matrix[k] -= count - self.num_particles
+                    count = self.num_particles
+                    return occ_matrix
+        
+        else:
+            for k in range(self.num_states):
+                occ_matrix[k] = 1
+        
+        return occ_matrix
+    
+
+    def get_full_sp_energies(self, sp_energies):
+        if self.include_m:
+            return sp_energies
+
+        full_sp_energies = []
+        for k in range(self.num_states):
+            n, l, twoj = self.system.index_unflattener(k)
+            multiplicity = twoj + 1
+            full_sp_energies.extend([sp_energies[k]] * multiplicity)
+        
+        return np.array(full_sp_energies)
+    
+
 
     @staticmethod
-    def compute_hf_energy(sp_energies, t_matrix, V_matrix, V_non_asym, rho, D, n_particles):
-
+    # TODO: Do this properly using the occupation matrix... this is a disaster right now
+    def compute_hf_energy(sp_energies, full_sp_energies, t_matrix, V_matrix, V_non_asym, rho, D, n_particles, occ_matrix):
+        
+        #D = D.T
         # Change the basis of the matrices to the HF basis
         D_dagger = D.conj().T
 
         rho_hf = np.dot(D_dagger, np.dot(rho, D))
+        print("rho_hf", rho_hf)
         t_matrix_hf = np.dot(D_dagger, np.dot(t_matrix, D))
 
         start = time.time()
@@ -281,29 +378,26 @@ class Solver:
 
         #testV = hf_numba_helpers.n_change_basis_4d(V_matrix, D)
  
-        # For comparison purposes:
-        rho_trunc = rho_hf[:n_particles, :n_particles]
-        V_trunc = V_matrix_hf[:n_particles, :n_particles, :n_particles, :n_particles]
-        V_non_asym_trunc = V_non_asym_hf[:n_particles, :n_particles, :n_particles, :n_particles]
-        t_trunc = t_matrix_hf[:n_particles, :n_particles]
-        
-        hf_energy = 0.5 * (np.trace(t_trunc) + np.sum(sp_energies[:n_particles]))
+        # Compute the energy in multiple ways:
+        #hf_energy = 0.5 * (np.trace(t_matrix) + np.sum(full_sp_energies[:n_particles]))
+        hf_energy = 0.5 * (np.einsum('ii,i', t_matrix_hf, occ_matrix) + np.sum(full_sp_energies[:n_particles]))
         
         # print("HF ENERGY", hf_energy)
         # exit()
         # return hf_energy
 
         # These two are wrong (has to be with the non-asym potential)
-        e_hartree = 0.5 * np.einsum('ijkl,ki,lj', V_non_asym_trunc, rho_trunc, rho_trunc, optimize='optimal')
-        e_fock = -0.5 * np.einsum('ijlk,ki,lj', V_non_asym_trunc, rho_trunc, rho_trunc, optimize='optimal')
-        hf_energy_2 = np.sum(sp_energies[:n_particles]) - e_hartree - e_fock
+        e_hartree = 0.5 * np.einsum('ijkl,ki,lj', V_non_asym_hf, rho_hf, rho_hf, optimize='optimal')
+        e_fock = -0.5 * np.einsum('ijlk,ki,lj', V_non_asym_hf, rho_hf, rho_hf, optimize='optimal')
+        hf_energy_2 = np.sum(full_sp_energies[:n_particles]) - e_hartree - e_fock
 
-        e_kin = np.einsum('ij,ji', t_trunc, rho_trunc)
-        e_int = 0.5 * np.einsum('ijkl,ki,lj', V_trunc, rho_trunc, rho_trunc, optimize='optimal')
+        e_ho = np.einsum('ij,ji', t_matrix_hf, rho_hf)
+        e_int = 0.5 * np.einsum('ijkl,ki,lj', V_matrix_hf, rho_hf, rho_hf, optimize='optimal')
+        e_int_2 = hf_energy - e_ho
 
         # Another way of getting the energy
-        hf_energy_3 = np.trace(t_trunc) + 0.5 * np.einsum('ijij', V_trunc)
-        hf_energy_4 = np.sum(sp_energies[:n_particles]) - 0.5 * np.einsum('ijij', V_trunc)
+        hf_energy_3 = np.einsum('ii,i', t_matrix_hf, occ_matrix) + 0.5 * np.einsum('ijij,i,j', V_matrix_hf, occ_matrix, occ_matrix)
+        hf_energy_4 = np.sum(full_sp_energies[:n_particles]) - 0.5 * np.einsum('ijij,i,j', V_matrix_hf, occ_matrix, occ_matrix)
         #hf_energy_5 = np.einsum('ab,ba', t_trunc, rho_trunc) + 0.5 * np.einsum('abcd,db,ca', V_trunc, rho_trunc, rho_trunc)
         hf_energy_5 = np.einsum('ab,ba', t_matrix, rho) + 0.5 * np.einsum('abcd,db,ca', V_matrix, rho, rho, optimize='optimal')
         #print(np.trace(t_trunc), 0.5 * np.trace(np.einsum('ijij', V_trunc)))
@@ -314,8 +408,8 @@ class Solver:
         print("SDAS", hf_energy, hf_energy_2, hf_energy_3, hf_energy_4, hf_energy_5)
         print("E_hartree", e_hartree)
         print("E_fock", e_fock)
-        print("E_kin (not really)", e_kin)
-        print("E_int", e_int)
+        print("E_onebody", e_ho)
+        print("E_int", e_int, e_int_2)
 
         return hf_energy
     
@@ -323,14 +417,13 @@ class Solver:
 
 if __name__ == "__main__":
 
-    system = hfs.System(Ne_max=2, l_max=1, hbar_omega=10, mass=939)
-    print("asdfsa")
-    solver = Solver(system, num_particles=2)
+    system = hfs.System(Ne_max=2, l_max=1, hbar_omega=10, mass=939, include_m=False)
+    solver = Solver(system, num_particles=8)
 
     print("Number of states:", system.num_states)
 
     start_time = time.time()
-    hf_energy, sp_energies, eigenvectors = solver.run(max_iterations=300, mixture=0)
+    hf_energy, sp_energies, eigenvectors = solver.run(max_iterations=500, mixture=0.3)
 
     end_time = time.time()
     print("Time elapsed: {} seconds".format(end_time - start_time))

@@ -7,7 +7,7 @@ from itertools import product
 import sys
 sys.path.append('../src')
 
-import moshinsky_way as mw
+import moshinsky_way as mw # type: ignore
 import helpers
 
 

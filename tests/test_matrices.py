@@ -7,7 +7,7 @@ from itertools import product
 import sys
 sys.path.append('../src')
 
-import moshinsky_way as mw
+import moshinsky_way as mw # type: ignore
 import helpers
 
 
@@ -36,6 +36,7 @@ class TestMatrices(unittest.TestCase):
         
         self.central_potential_matrix = mw.set_central_potential_matrix(self.central_potential_J_coupling_matrix, self.Ne_max, self.l_max)
     
+
     def test_reduced_matrix(self):
         # The reduced matrix should be diagonal in l
         for n1, l1, n2, l2 in product(range(self.Ne_max//2+1), range(self.l_max+1), range(self.Ne_max//2+1), range(self.l_max+1)):
@@ -46,6 +47,18 @@ class TestMatrices(unittest.TestCase):
         for n1, n2, l in product(range(self.Ne_max//2+1), range(self.Ne_max//2+1), range(self.l_max+1)):
             self.assertTrue(np.isclose(self.central_potential_reduced_matrix[n1,l,n2,l],
                                         self.central_potential_reduced_matrix[n2,l,n1,l]))
+        
+        # Check if the matrix values coincide with the values returned by the matrix element function
+        for n1, n2, l in product(range(self.Ne_max//2+1), range(self.Ne_max//2+1), range(self.l_max+1)):
+            val = mw.central_potential_reduced_matrix_element(self.wavefunctions, n1, l, n2, l, 200, 1.487, self.integration_limit, self.integration_steps)
+            mat_val = self.central_potential_reduced_matrix[n1,l,n2,l]
+
+            if not np.isclose(val, mat_val):
+                print(val, mat_val)
+                print(n1, n2, l)
+
+            self.assertTrue(np.isclose(val, mat_val))
+
     
 
     def test_ls_coupling_basis_matrix(self):

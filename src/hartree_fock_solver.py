@@ -169,7 +169,7 @@ class Solver:
         # Is gamma diagonal in spin?
         print("Gamma diagonal in spin:", np.allclose(gamma[0::2, 1::2], 0))
 
-        #print(gamma)
+        print(gamma)
 
         return t_matrix + gamma
 

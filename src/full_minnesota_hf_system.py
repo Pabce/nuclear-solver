@@ -32,14 +32,14 @@ class System:
     kappat = 0.639 # fm^-2
     kappas = 0.465 # fm^-2 
 
-    def __init__(self, Ne_max, l_max, hbar_omega=1, mass=1) -> None:
+    def __init__(self, Ne_max, l_max, hbar_omega=1, mass=1, include_m=True) -> None:
         self.Ne_max = Ne_max
         # l_max represents the maximum value of l (cannot be larger than Ne_max)
         if l_max > Ne_max:
             raise ValueError("l_max cannot be larger than Ne_max")
 
         # l can go from Ne to 0 in steps of 2
-        num_states = 0
+        true_num_states = 0
         num_j_states = 0
         for Ne in range(Ne_max + 1):
             max_l = min(Ne, l_max)
@@ -47,19 +47,23 @@ class System:
                 if l > max_l:
                     continue
                 for twoj in range(np.abs(2*l - 1), 2*l + 2, 2):
-                    num_states += twoj + 1 # for the j and m_j degeneracy
+                    true_num_states += twoj + 1 # for the j and m_j degeneracy
                     num_j_states += 1
 
-        self.num_states = int(num_states)
+        self.true_num_states = int(true_num_states)
         self.num_j_states = int(num_j_states)
+        self.num_states = true_num_states if include_m else num_j_states
+
         self.n_level_max = Ne_max // 2
         self.l_level_max = l_max
 
         self.hbar_omega = hbar_omega
         self.mass = mass
 
+        self.include_m = include_m
+
         # List of all energies and their indices
-        self.eigenenergies, self.eigenenergies_flat, self.quantum_numbers = self.get_lowest_energies()
+        self.eigenenergies, self.eigenenergies_flat, self.quantum_numbers = self.get_lowest_energies(include_m=self.include_m)
 
         self.wavefunctions, self.sqrt_norms = self.generate_wavefunctions()
 
@@ -159,9 +163,10 @@ class System:
         # 3... Ignoring for now
 
         cp_mats = []
+        cp_J_coupling_basis_mats = []
         V_mats = []
         for params in [(self.V0R, self.kappaR, "none", "even"), (-self.V0s, self.kappas, "singlet", "even"), (-self.V0t, self.kappat, "triplet", "even")]: 
-            V0, kappa, spin_selector, parity_selector = params
+            V0, kappa, spin_projector, parity_projector = params
 
             start = time.time()
             central_potential_reduced_matrix = mw.set_central_potential_reduced_matrix(wfs, V0, kappa,
@@ -188,8 +193,9 @@ class System:
             # Set the central potential matrix in J coupling basis
             start = time.time()
             central_potential_J_coupling_matrix = mw.set_central_potential_J_coupling_basis_matrix(central_potential_ls_coupling_basis_matrix, 
-                                                                                wigner_9j_dict, Ne_max, l_max, spin_selector, parity_selector)
+                                                                                wigner_9j_dict, Ne_max, l_max, spin_projector, parity_projector)
             print("Time to set J coupling basis matrix:", time.time() - start)
+            cp_J_coupling_basis_mats.append(central_potential_J_coupling_matrix)
             
             # Get the central potential matrix, once and for all
             start = time.time()
@@ -202,26 +208,9 @@ class System:
         
         # cp_mats have components (n1, l1, twoj1, n2, l2, twoj2, n3, l3, twoj3, n4, l4, twoj4)
         v = cp_mats[0] + cp_mats[1] + cp_mats[2]
+        v *= -1
 
-        # Antisymmetrize the potential matrix
-        # v_a = np.zeros_like(v)
-        # for n1, n2 in product(range(self.n_level_max + 1), repeat=2):
-        #     for l1, l2, l3, l4 in product(range(self.l_level_max + 1), repeat=4):
-        #         for twoj1_idx, twoj2_idx, twoj3_idx, twoj4_idx in product(range(2), repeat=4):
-        #             Vm = v[n1,l1,twoj1_idx, n2,l2,twoj2_idx, :,l3,twoj3_idx, :,l4,twoj4_idx]
-        #             Vm2 = v[n1,l1,twoj1_idx, n2,l2,twoj2_idx, :,l4,twoj4_idx, :,l3,twoj3_idx]
-                
-        #             v_a[n1,l1,twoj1_idx, n2,l2,twoj2_idx, :,l3,twoj3_idx, :,l4,twoj4_idx] = Vm - Vm2.T
-        #             v_a[:,l3,twoj3_idx, :,l4,twoj4_idx, n1,l1,twoj1_idx, n2,l2,twoj2_idx] = Vm - Vm2.T
-        
-        v_a = np.zeros_like(v)
-        for n1, n2 in product(range(self.n_level_max + 1), repeat=2):
-            for l1, l2 in product(range(self.l_level_max + 1), repeat=2):
-                for twoj1_idx, twoj2_idx in product(range(2), repeat=2):
-                    Vm = v[n1,l1,twoj1_idx, n2,l2,twoj2_idx, :,:,:, :,:,:]
-                    Vm_t = Vm.transpose((3,4,5, 0,1,2))
-                
-                    v_a[n1,l1,twoj1_idx, n2,l2,twoj2_idx, :,:,:, :,:,:] = Vm - Vm_t
+        v_a = v - v.transpose((0,1,2, 3,4,5, 9,10,11, 6,7,8))
 
         V_mat = v_a
         V_non_asym = v
@@ -233,53 +222,15 @@ class System:
         print("All zeros?", np.allclose(V_mat, 0))
         print("Fraction of non-zero elements?", np.count_nonzero(V_mat)/V_mat.size)
 
-        print("wtf All antisym", np.allclose(v_a, -v_a.transpose((0,1,2, 3,4,5, 9,10,11, 6,7,8))))
-        
-        # all_antisyms = True
-        # # Is the potential antisymmetric in the last two states?
-        # for n1, n2 in product(range(self.n_level_max + 1), repeat=2):
-        #     for l1, l2, l3, l4 in product(range(self.l_level_max + 1), repeat=4):
-        #         for twoj1_idx, twoj2_idx, twoj3_idx, twoj4_idx in product(range(2), repeat=4):
-        #             Vm = V_mat[n1,l1,twoj1_idx,n2,l2,twoj2_idx,:,l3,twoj3_idx,:,l4,twoj4_idx]
-        #             Vm_t = V_mat[n1,l1,twoj1_idx,n2,l2,twoj2_idx,:,l4,twoj4_idx,:,l3,twoj3_idx]
-
-        #             antisym = np.allclose(Vm, -Vm_t)
-        #             if not antisym:
-        #                 print("\nn1, n2", n1, n2)
-        #                 print("l1, l2, l3, l4", l1, l2, l3, l4)
-        #                 print("twoj1_idx, twoj2_idx, twoj3_idx, twoj4_idx", twoj1_idx, twoj2_idx, twoj3_idx, twoj4_idx)
-        #                 print(Vm)
-        #                 print(Vm_t)
-        #                 all_antisyms = False
-        # print("All antisym?", all_antisyms)
-        # exit()
+        print("Asym potential -- All antisym", np.allclose(v_a, -v_a.transpose((0,1,2, 3,4,5, 9,10,11, 6,7,8))))
+        #print("Asym potential -- All antisym 2", np.allclose(v_a, -v_a.transpose((3,4,5, 0,1,2, 6,7,8, 9,10,11))))
 
         # Some checks on V_mat
         # Is it sym?
-        all_sym = True
-        # for n1, n2 in product(range(self.n_level_max + 1), repeat=2):
-        #     for l1, l2, l3, l4 in product(range(self.l_level_max + 1), repeat=4):
-        #         for twoj1_idx, twoj2_idx, twoj3_idx, twoj4_idx in product(range(2), repeat=4):
-        #             Vm = V_mat[n1,l1,twoj1_idx, n2,l2,twoj2_idx, :,:,:,:,:,:]
-        #             Vm2 = V_mat[:,:,:,:,:,:, n1,l1,twoj1_idx, n2,l2,twoj2_idx]
-
-        #             sym = np.allclose(Vm, Vm2)
-        #             #print("V sym:", sym)
-
-        #             if not sym:
-        #                 print("\nn1, n2", n1, n2)
-        #                 print("l1, l2, l3, l4", l1, l2, l3, l4)
-        #                 print("twoj1_idx, twoj2_idx, twoj3_idx, twoj4_idx", twoj1_idx, twoj2_idx, twoj3_idx, twoj4_idx)
-        #                 # print(Vm.shape)
-        #                 # print(Vm2.shape)
-        #                 # print(Vm[:,1,1:,0,1])
-        #                 # print(Vm2[:,1,1:,0,1])
-        #                 all_sym = False
-        #                 break
-
-        # print("All sym?", all_sym)
+        print("Not antisymmetrized potetial -- All sym?", np.allclose(v, v.transpose((6,7,8, 9,10,11, 0,1,2, 3,4,5))))
+        print("Asym potetial -- All sym?", np.allclose(V_mat, V_mat.transpose((6,7,8, 9,10,11, 0,1,2, 3,4,5))))
         
-        # print("------------------ªªªªª------------------")
+        print("------------------ªªªªª------------------")
 
         # print(V_mat[0,0,1,1,0,1,:,0,1,:,0,1])
         # print(self.index_flattener(0,0,1,-1))
@@ -288,7 +239,129 @@ class System:
 
         
 
-        return V_mat, V_non_asym
+        return V_mat, V_non_asym, cp_J_coupling_basis_mats
+
+
+    def get_two_body_matrix_elements_2(self):
+        Ne_max, l_max, hbar_omega, mass = self.Ne_max, self.l_level_max, self.hbar_omega, self.mass
+        integration_limit, integration_steps = 40, 5500
+
+        # TODO: Add a way to pass the potential into the Moshinsky class
+        # Set the radial wavefunctions
+        wfs = mw.set_wavefunctions(Ne_max, l_max, hbar_omega, mass, integration_limit, integration_steps)
+
+        # Set the Moshinsky brackets, reading from file
+        start = time.time()
+        moshinsky_brackets = mw.set_moshinsky_brackets(Ne_max, l_max)
+        print("Time to set Moshinsky brackets:", time.time() - start)
+
+        # Set the Wigner 9j symbols, reading from file
+        start = time.time()
+        wigner_9j_dict = mw.set_wigner_9js()
+        print("Time to set Wigner 9j symbols:", time.time() - start)
+
+        print('---------------------------------------------------------------')
+
+        # We'll try to antisymmetrize directly
+
+        cp_mats = []
+        cp_J_coupling_basis_mats = []
+        V_mats = []
+        for params in [(self.V0R, self.kappaR, "singlet", "even"), (-self.V0s, self.kappas, "singlet", "even")]: 
+            V0, kappa, spin_projector, parity_projector = params
+
+            start = time.time()
+            central_potential_reduced_matrix = mw.set_central_potential_reduced_matrix(wfs, V0, kappa,
+                                                        Ne_max, l_max, integration_limit, integration_steps)
+            print("Time to set reduced matrix elements:", time.time() - start)
+
+            # Set the central potential matrix in ls coupling basis
+            start = time.time()
+            central_potential_ls_coupling_basis_matrix = mw.set_central_potential_ls_coupling_basis_matrix(central_potential_reduced_matrix,
+                                                                                                        moshinsky_brackets, Ne_max, l_max, parity_projector)
+            print("Time to set ls coupling basis matrix:", time.time() - start)
+            # for n1, n2 in product(range(self.n_level_max), repeat=2):
+            #     mt = central_potential_ls_coupling_basis_matrix[n1,0, n2,0, :,0, :,0, 0]
+            #     mt2 = central_potential_ls_coupling_basis_matrix[:,0, :,0, n1,0, n2,0, 0]
+            #     #mt = central_potential_ls_coupling_basis_matrix[n1,0,n2,0,:,0,:,0,0]
+            #     print("CHECK: Is it hermitian?:", np.allclose(mt, mt2))
+
+            #     if not np.allclose(mt, mt2):
+            #         print(mt)
+            #         print(mt2)
+
+            # exit()
+            
+            # Set the central potential matrix in J coupling basis
+            start = time.time()
+            central_potential_J_coupling_matrix = mw.set_central_potential_J_coupling_basis_matrix(central_potential_ls_coupling_basis_matrix, 
+                                                                                wigner_9j_dict, Ne_max, l_max, spin_projector, parity_projector)
+            print("Time to set J coupling basis matrix:", time.time() - start)
+            cp_J_coupling_basis_mats.append(central_potential_J_coupling_matrix)
+            
+            # Get the central potential matrix, once and for all
+            start = time.time()
+            central_potential_matrix = mw.set_central_potential_matrix(central_potential_J_coupling_matrix, Ne_max, l_max)
+            print("Time to set central potential matrix:", time.time() - start)
+
+            cp_mats.append(central_potential_matrix)
+
+            print("------------------------------------------------------------------------------")
+        
+        # cp_mats have components (n1, l1, twoj1, n2, l2, twoj2, n3, l3, twoj3, n4, l4, twoj4)
+        v = cp_mats[0]# + cp_mats[1]
+        v *= 1
+
+        vd = v
+        ve_pr = v # v.transpose((0,1,2, 3,4,5, 6,7,11, 9,10,8))
+
+        V_mat = vd
+        #V_mat = V_mat - V_mat.transpose((0,1,2, 3,4,5, 9,10,11, 6,7,8))
+        V_non_asym = v
+
+        # print(self.num_states)
+        # print(V_mat.shape)
+
+        # Some checks
+        print("All zeros?", np.allclose(V_mat, 0))
+        print("Fraction of non-zero elements?", np.count_nonzero(V_mat)/V_mat.size)
+
+        asym = np.allclose(V_mat, -V_mat.transpose((0,1,2, 3,4,5, 9,10,11, 6,7,8)))
+        print("Asym potential -- All antisym:", asym)
+        print("Asym J coupling basis -- All antisym:", np.allclose(cp_J_coupling_basis_mats[0], -cp_J_coupling_basis_mats[0].transpose((0,1,2, 3,4,5, 9,10,11, 6,7,8, 12))))
+        #print("Asym potential -- All antisym 2", np.allclose(v_a, -v_a.transpose((3,4,5, 0,1,2, 6,7,8, 9,10,11))))
+
+        V_mat = cp_J_coupling_basis_mats[0]
+        if not asym:
+            for n1, n2, n3, n4 in product(range(self.n_level_max + 1 -1), repeat=4):
+                for l1, l2, l3, l4 in product(range(self.l_level_max + 1 -1), repeat=4):
+                    for twoj1_idx, twoj2_idx, twoj3_idx, twoj4_idx in product(range(2), repeat=4):
+
+                        if not np.allclose(V_mat[n1,l1,twoj1_idx, n2,l2,twoj2_idx, n3,l3,twoj3_idx, n4,l4,twoj4_idx],
+                            -V_mat[n1,l1,twoj1_idx, n2,l2,twoj2_idx, n4,l4, twoj4_idx, n3,l3,twoj3_idx]):
+
+                            print(n1,l1,twoj1_idx, "|", n2,l2,twoj2_idx, "|", n3,l3,twoj3_idx, "|", n4,l4,twoj4_idx)
+                            print(V_mat[n1,l1,twoj1_idx, n2,l2,twoj2_idx, n3,l3,twoj3_idx, n4,l4,twoj4_idx])
+                            print(V_mat[n1,l1,twoj1_idx, n2,l2,twoj2_idx, n4,l4,twoj4_idx, n3,l3,twoj3_idx])
+                            print('------------------------------')
+
+        exit()
+
+        # Some checks on V_mat
+        # Is it sym?
+        print("Not antisymmetrized potetial -- All sym?", np.allclose(v, v.transpose((6,7,8, 9,10,11, 0,1,2, 3,4,5))))
+        print("Asym potetial -- All sym?", np.allclose(V_mat, V_mat.transpose((6,7,8, 9,10,11, 0,1,2, 3,4,5))))
+        
+        print("------------------ªªªªª------------------")
+
+        # print(V_mat[0,0,1,1,0,1,:,0,1,:,0,1])
+        # print(self.index_flattener(0,0,1,-1))
+        # print(self.index_flattener(1,0,1,-1))
+
+
+        
+
+        return V_mat, V_non_asym, cp_J_coupling_basis_mats
 
 
     # Energies of the HO basis eigenstates
@@ -299,7 +372,7 @@ class System:
             return 0.5 * self.hbar_omega * Ne
 
     # Get the indices of the lowest energy states
-    def get_lowest_energies(self):
+    def get_lowest_energies(self, include_m):
         energies_nl = np.zeros((self.n_level_max + 1, self.l_level_max + 1))
         energies_flat = []
         quantum_numbers = []
@@ -310,15 +383,19 @@ class System:
                 energies_nl[n, l] = e
 
                 for twoj in range(np.abs(2 * l - 1), 2 * l + 2, 2):
-                    energies_flat.extend([e] * (twoj + 1))
-                    quantum_numbers.extend([(n, l, twoj)] * (twoj + 1))
+                    if include_m:
+                        energies_flat.extend([e] * (twoj + 1))
+                        quantum_numbers.extend([(n, l, twoj)] * (twoj + 1))
+                    else:
+                        energies_flat.append(e)
+                        quantum_numbers.append((n, l, twoj))
 
         #idx = np.argsort(energies)[:num]
         return energies_nl, energies_flat, quantum_numbers
     
     # --------------------------------------------------------------------------------------------------------
     # Methods to be used by the solver class to convert between quantum numbers and flat indices
-    def index_flattener(self, n, l, twoj, twom):
+    def index_flattener(self, n, l, twoj, twom=None):
         
         if twoj > 2 * l + 1 or twoj < np.abs(2 * l - 1):
             raise ValueError("The value of twoj={} is not allowed for the given value of l={}".format(twoj, l))
@@ -351,7 +428,7 @@ class System:
         raise ValueError("Something went wrong")
 
     
-    def index_unflattener(self, idx, include_m):
+    def index_unflattener(self, idx):
         idxp = 0
         for n_p in range(self.n_level_max + 1):
             Nep_min = 2 * n_p
@@ -359,15 +436,21 @@ class System:
 
             for lp in range(lp_max + 1):
                 for twojp in range(np.abs(2 * lp - 1), 2 * lp + 2, 2):
-                    for twomp in range(-twojp, twojp + 1, 2):
+                    #print(n_p, lp, twojp)
+                    if not self.include_m:
                         if idxp == idx:
-                            return n_p, lp, twojp, twomp
+                            return n_p, lp, twojp
                         idxp += 1
+                    else:
+                        for twomp in range(-twojp, twojp + 1, 2):
+                            if idxp == idx:
+                                return n_p, lp, twojp, twomp
+                            idxp += 1
 
         raise ValueError("The index provided is too large")
     
 
-    # This is probably mega-slow for larger systems and will need to be numbad. Indeed.
+    # This is probably mega-slow for larger systems and will need to be numbad --> Indeed.
     # TODO: Does this need any extra info on how to treat the ms? Does adding m_diagonal even make sense?
     # Make sure the chipmunks don't eat the hamiltonian
     def matrix_ndflatten(self, matrix, dim=2, include_m=False, m_diagonal=False, asym=False):
@@ -387,6 +470,7 @@ class System:
 
             # Special unphysical case: FIXME
             if np.any(twoj < 0):
+                #print("Skipping", n, l, twoj)
                 continue
             # Unneeded values for the flattened matrix 
             if np.any(2 * n + l > self.Ne_max):
@@ -419,6 +503,8 @@ class System:
             else:
                 for i in range(dim):
                     idx[i] = self.index_flattener(n[i], l[i], twoj[i], None)
+                
+                flat_matrix[tuple(idx)] = el
         
         return flat_matrix
 

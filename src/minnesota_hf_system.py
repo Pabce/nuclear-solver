@@ -75,8 +75,8 @@ class System:
     
 
     def grid_twod_radial_integral(self, V0, mu, k1, k2, k3, k4, integration_limit=10):
-        r1 = np.linspace(0.001, integration_limit, 500)
-        r2 = np.linspace(0.001, integration_limit, 500)
+        r1 = np.linspace(1e-8, integration_limit, 700)
+        r2 = np.linspace(1e-8, integration_limit, 700)
 
         rect = np.diff(r1)[0] * np.diff(r2)[0]
 
@@ -85,15 +85,24 @@ class System:
         # TODO: Shouldn't 1 and 4 carry r2?
         rfunc_1 = self.wavefunctions[k1, 0](r2)
         rfunc_2 = self.wavefunctions[k2, 0](r1)
-        rfunc_3 = self.wavefunctions[k3, 0](r1)
-        rfunc_4 = self.wavefunctions[k4, 0](r2)
+        rfunc_3 = self.wavefunctions[k3, 0](r2)
+        rfunc_4 = self.wavefunctions[k4, 0](r1)
 
         # TODO: is this 0.5 or 1? and + or -?
-        potential_l0 = - 0.5 * V0 * 1/(2 * mu) * np.reciprocal(r1 * r2) * np.exp(-mu * (r1 + r2)**2) * (-1 + np.exp(4 * mu * r1 * r2))
+        exp1 = np.exp(-mu * (r1 + r2)**2)
+        exp3 = np.exp(-mu * (r1 - r2)**2)
+        potential_l0 = -0.5 * V0 * 1/(2 * mu) * np.reciprocal(r1 * r2) * (-exp1 + exp3)
+        # Remove all infs and nans
+        # potential_l0[np.isnan(potential_l0)] = 0
+        # potential_l0[np.isinf(potential_l0)] = 0
+
+        # plt.matshow(np.log(-potential_l0))
+        # plt.colorbar()
+        # plt.show()
 
         #t0 = time.time()
         radial_integral = np.sum(r1**2 * r2**2 * rfunc_1 * rfunc_2 * potential_l0 * rfunc_3 * rfunc_4) * rect
-        radial_integral *= 1/(4*np.pi) #4 * np.pi #1/ (4 * np.pi)
+        radial_integral *= np.pi**2/4 #1/ (4 * np.pi)
         #t1 = time.time()
         #print(f"GRID Time to compute integral: {t1 - t0}, Value: {radial_integral}")
 
