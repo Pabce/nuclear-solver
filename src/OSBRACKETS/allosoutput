@@ -1,6 +1,6 @@
  1. bracket <n1p L 0 0|n1 l1 n2 l2>_L^varphi
  n1 =           3  l1 =           2  n2 =           2  l2 =           4  L =           4
- exact bracket  0.15256312866340882       bracket from the code  0.15256312866340879     
+ exact bracket  0.15256312866340874       bracket from the code  0.15256312866340879     
  2. Symmetry test, L=           9
  m =           5  n =           4  n1 =           3  n2 =           2
  mp =           4  np =           3  n1p =           3  n2p =           3

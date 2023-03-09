@@ -5,7 +5,7 @@ program compute_brackets
     implicit none
     !dimension fac(0:201),dfac(0:201),defac(0:201),rfac(0:100)
     double precision, allocatable :: BRAC(:,:,:,:,:,:,:,:)
-    integer :: np, n1p, mp, n1, n2, n, m, l, istatus, i
+    integer :: np, n1p, mp, n1, n2, n, m, l, istatus, i, l1, l2, eps, l1p, l2p, n2p, nnp, Nq, Nqp, nl1p, nl2p, nn
     double precision :: SI, CO
     
     ! Input parameters (absurdly read from command line, fucking nightmare)
@@ -37,6 +37,7 @@ program compute_brackets
     ! Allocate the array
     allocate (BRAC(0:LMAX, 0:(NQMAX-LMIN)/2, 0:(NQMAX-LMIN)/2, 0:(NQMAX-LMIN)/2,&
     0:(NQMAX-LMIN)/2, 0:LMAX, 0:(NQMAX-LMIN)/2, LMIN:LMAX), STAT=istatus)
+    BRAC = 0.d0
     
     IF (istatus /= 0) STOP "TESTOSBRAC: allocate(BRAC) failed"
 
@@ -55,26 +56,101 @@ program compute_brackets
                             do n1p = 0, (NQMAX-LMIN)/2
                                 do mp = 0, (NQMAX-LMIN)/2
                                     i = i + 1
+
+                                    eps = mod((NQMAX - L), 2)
+                                    l1 = M + N + eps
+                                    l2 = M - N + L
+                                    l1p = MP + NP + eps
+                                    l2p = MP - NP + L
+                                    n2p = M + n1 + n2 - MP - n1p
+
+                                    ! Verify triangle inequality
+                                    if ((L > (l1 + l2)) .or. (L < abs(l1 - l2))) then
+                                        cycle
+                                    end if
                                     
-                                    ! da
+                                    ! Skip unphysical values of n2p, l1, l2, l1p, l2p
+                                    if ((n2p < 0) .or. (l1 < 0) .or. (l2 < 0) .or. (l1p < 0) .or. (l2p < 0))then
+                                        cycle
+                                    end if
+
+                                    ! "Swap" values of N and NP
+                                    nnp = (l2p - l1p + L - eps)/2
+                                    nn = (l2 - l1 + L - eps)/2
+                                    
+                                    !if (nnp < 0) then
+                                    !     cycle
+                                    ! end if
+
+                                    Nq = 2 * n1 + l1 + 2 * n2 + l2
+                                    Nqp = 2 * n1p + l1p + 2 * n2p + l2p
 
                                     !print *, i
                                     ! Write all the indices and the BRAC value to the file
                                     ! Write only if the value is not zero (or close to zero)
-                                    if (np == 2 .and. n1p == 5 .and. mp == 0 .and. n1 == 2 .and. &
-                                        n2 == 2 .and. n == 1 .and. m == 1 .and. l == 2) then
+                                    if (np == 0 .and. n1p == 0 .and. mp == 0 .and. n1 == 0 .and. &
+                                        n2 == 0 .and. n == 0 .and. m == 1 .and. l == 1) then
                                         print *, np, n1p, mp, n1, n2, n, m, l
                                         print *, BRAC(np, n1p, mp, n1, n2, n, m, l)
+                                        print *, BRAC(n, n1, m, n1p, n2p, np, mp, l)
                                     end if
+                                     
+                                    ! As this program is retarded, I'm gonna follow Moshinsky's advice and only
+                                    ! compute the neccessary brackets by symmetry. Maybe that fixes it...
+                                    ! if ((l1 > l2) .or. (l1p > l2p)) then
+                                    !     cycle
+                                    ! end if
 
                                     if (abs(BRAC(np, n1p, mp, n1, n2, n, m, l)) > 1.d-10) then
+                                    ! print *, Np, nnp, n2p
+                                    ! print *, l1, l2, l1p, l2p
+                                    ! print *, M, N, n1, n2, n1p, MP, NP, L
+                                    ! print *, Nq, Nqp
+                                    ! print *, "-----------------"
+                                    !if (abs(BRAC(nnp, n2p, mp, n1, n2, n, m, l)) > 1.d-10) then
+                                        
+                                        ! To get the original Moshinsky coefficients... ????
                                         write(10, '(8(2I4))', advance="no") np, n1p, mp, n1, n2, n, m, l
                                         write(10, *) BRAC(np, n1p, mp, n1, n2, n, m, l)
-                                        ! if (n1p > 7) then
-                                        !     print *, "n1p = ", n1p
-                                        !     print *, NQMAX
-                                        !     print *, LMIN
-                                        !end if
+                                        !print *, (-1)**(l1p+l2p+l), (-1)**(l1p+l2p+l)
+
+                                        ! nnp, n2p, mp, n1, n2, n, m, l
+                                        ! Best attemp yet...
+                                        ! write(10, '(8(2I4))', advance="no") nnp, n2p, mp, n1, n2, n, m, l
+                                        ! write(10, *) (-1)**(l + l1) * BRAC(np, n1p, mp, n1, n2, n, m, l)
+                                        !print *, n1p, (2 * n1 + l1 + 2 * n2 + l2 - l1p - 2 * n2p - l2p)/2
+                                        !print *, nnp, np + l2p - l1p
+                                        ! nl1p = MP + nnp + eps
+                                        ! nl2p = MP - nnp + L
+                                        ! print *, nl1p, nl2p, l1p, l2p
+                                        
+                                        ! if (abs(BRAC(nn, n2, m, n2p, n1p, nnp, mp, l) - &
+                                        !         BRAC(np, n1p, mp, n1, n2, n, m, l)) > 1.d-8) then
+                                            
+                                        !     print *, "NOT OK", BRAC(nn, n2, m, n2p, n1p, nnp, mp, l), &
+                                        !                         BRAC(np, n1p, mp, n1, n2, n, m, l)
+                                        ! end if
+                                        
+                                        if (BRAC(np, n1p, mp, n1, n2, n, m, l) - &
+                                            BRAC(n, n1, m, n1p, n2p, np, mp, l) < 1.d-8) then
+                                            
+                                            !print *, "OK"
+                                            !print *, (-1)**(l1p+l2), (-1)**(l1+l2p)
+                                            ! if (Nq /= Nqp) then
+                                            !     print *, "NQ != NQP"
+                                            !     print *, Nq, Nqp
+                                            !     continue
+                                            ! end if
+
+                                            continue
+                                        else
+                                            print *, "NOT OK", BRAC(np, n1p, mp, n1, n2, n, m, l) &
+                                                                - BRAC(n, n1, m, n1p, n2p, np, mp, l)
+
+                                            continue
+                                        end if          
+
+
                                     end if
                                 end do
                             end do

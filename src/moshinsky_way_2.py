@@ -1,6 +1,7 @@
 import numpy as np
-from numba import cfunc, jit, float64, int64, int32, int16, int8, void, prange, njit, vectorize
-from numba.types import unicode_type
+from numba import cfunc, jit, float64, int64, int32, int16, int8, void, prange, njit, vectorize, boolean
+from numba.types import unicode_type, Tuple, DictType, UniTuple
+from numba.typed import Dict
 import time
 from sympy.physics.wigner import wigner_9j
 from itertools import product
@@ -43,164 +44,96 @@ def central_potential_reduced_matrix_element(wavefunctions, V0, mu, n1, l1, n2, 
 
 
 
-@njit(float64(float64[:,:,:,:], float64[:,:,:,:,:,:,:,:], int64, int64, int64, int64, int64, int64, int64, int64, int64, unicode_type), parallel=True, cache=True)
-def central_potential_ls_coupling_basis_matrix_element(cp_red_matrix, moshinsky_brackets,
-                                                         n1, l1, n2, l2, n3, l3, n4, l4, lamb, 
-                                                         parity_projector):
-    # Check lambda is allowed
-    if lamb < np.abs(l1 - l2) or lamb > l1 + l2:
-        return 0
-    if lamb < np.abs(l3 - l4) or lamb > l3 + l4:
-        return 0
+# Plain central potential V(r)
+@njit(float64(float64[:,:,:,:], int64, int64, int64, int64, int64, int64, int64,
+                                int64, int64, int64, int64, int64, int64), cache=True)
+def central_potential_moshinsky_basis_matrix_element(cp_red_matrix, small_n_prime, small_l_prime, big_N_prime, big_L_prime, lamb_prime, twoS_prime,
+                                                     small_n, small_l, big_N, big_L, lamb, twoS, twoJ):
     
-    #print(np.abs(l1 - l2), lamb, l1 + l2, np.abs(l3 - l4), lamb, l3 + l4)
-
-    Nq_12 = 2 * n1 + l1 + 2 * n2 + l2
-    Nq_34 = 2 * n3 + l3 + 2 * n4 + l4 # (I think we just have to consider Nq_12...)
-    Nq_lim = Nq_12 # max(Nq_12, Nq_34) # THIS IS NOT Nq_max!!! (the parameter in the function that calls this one, to fill the matrix)
-
-
-    mat_el = 0
-    for small_n in prange(Nq_12 // 2 + 1):
-        small_n_prime = small_n + n3 - n1 + n4 - n2 + (l3 + l4 - l1 - l2)//2
-
-        # n' cannot be negative (i.e., if it comes out negative it's because the energy conservation conditions cannot be satisfied)
-        if small_n_prime < 0:
-            continue
-
-        for small_l in prange(Nq_lim - 2*small_n + 1):
-            for big_N in prange((Nq_lim - 2*small_n - small_l)//2 + 1):
-                for big_L in prange(Nq_lim - 2*small_n - small_l - 2*big_N + 1):
-                    
-                    # if parity_projector == "even":
-                    #     if (l3 + l4 + small_l) % 2 != 0:
-                    #         continue
-                    # elif parity_projector == "odd":
-                    #     if small_l % 2 != 1:
-                    #         continue
-                    
-                    # Conditions for Moshinsky bracket to be non-zero 
-                    # Also guarantees conservation of parity: (-1)^(l1+l2) = (-1)^(l+L)
-                    if (2 * n1 + l1 + 2 * n2 + l2) != 2 * small_n + small_l + 2 * big_N + big_L:
-                        continue
-                    if (2 * n3 + l3 + 2 * n4 + l4) != 2 * small_n_prime + small_l + 2 * big_N + big_L:
-                        continue
-                    
-                    # print(n1, n2, n3, n4)
-                    # print(small_n, small_l, big_N, big_L)
-
-                    # TESTS
-                    # m = moshinsky_brackets[small_n_prime, small_l, big_N, big_L, n3, l3, l4, lamb]
-                    # print(small_n, small_n_prime, m)
-                    # print(small_n_prime, small_l, big_N, big_L, n3, l3, l4, lamb)
-                    # wh = np.nonzero(moshinsky_brackets[:,:,:,:,:,0,0,0])
-                    # print([wh[i][0] for i in range(3)])
-
-                    # n1, l1, n2, l2, n1', l1', l2', lamb   (  n2' = (2*n1 + l1 + 2*n2 + l2 - 2*n1' - l1' - l2')/2  )
-                    coeff_0 = moshinsky_brackets[small_n, small_l, big_N, big_L, n1, l1, l2, lamb]\
-                            * moshinsky_brackets[small_n_prime, small_l, big_N, big_L, n3, l3, l4, lamb]
-
-                    # "Generalized" Moshinsky bracket???
-                    coeff = moshinsky_brackets[big_N, big_L, small_n, small_l, n1, l1, l2, lamb]\
-                            * moshinsky_brackets[big_N, big_L, small_n_prime, small_l, n3, l3, l4, lamb]
-
-                    
-                    #coeff = coeff_0
-                    #print("HHHHH", coeff, coeff_0)
-
-                    central_potential_el = cp_red_matrix[small_n, small_l, small_n_prime, small_l] 
-                    #print("central_potential_el", central_potential_el)
-
-                    # print("n l N L, n'", small_n, small_l, big_N, big_L, small_n_prime)
-                    # print("Nq_12, Nq_34", Nq_12, Nq_34)
-                    # print("coeff", "coeff0", "mosh1", "mosh2", coeff, coeff_0, moshinsky_brackets[small_n, small_l, big_N, big_L, n1, l1, l2, lamb], 
-                    #       moshinsky_brackets[small_n_prime, small_l, big_N, big_L, n3, l3, l4, lamb], 
-                    #         (-1)**(big_L - lamb) * moshinsky_brackets[small_n_prime, small_l, big_N, big_L, n4, l4, l3, lamb])
-                    # print("central_potential_el", central_potential_el)
-                    # print("+ mat_el", coeff * central_potential_el)
-                    # print("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~")
-
-                    mat_el += coeff * central_potential_el
-
+    # Deltas
+    if small_l_prime != small_l or big_N_prime != big_N or big_L_prime != big_L:
+        return 0.
+    if lamb_prime != lamb or twoS_prime != twoS:
+        return 0.
+    
+    # J, lambda and S independent
+    mat_el = cp_red_matrix[small_n_prime, small_l, small_n, small_l]
+    
     return mat_el 
 
-# 1/2(1 + P_sigma) -> triplet, 1/2(1 - P_sigma) -> singlet, 1/2(1 + P_r) -> even, 1/2(1 - P_r) -> odd
-#@njit(float64(float64[:,:,:,:,:,:,:,:,:], int64, int64, int64, int64, int64, int64, int64, int64, int64, int64, int64, int64, int64, int64, int64), fastmath=True)
-def central_potential_J_coupling_matrix_element(cp_ls_matrix, wigner_9j_dict, n1, l1, twoj1, n2, l2, twoj2,
-                                                n3, l3, twoj3, n4, l4, twoj4, twoJ, spin_projector, parity_projector):
 
+# Central potential * spin-spin interaction -> (sigma_1 * sigma_2) V(r)
+@njit(float64(float64[:,:,:,:], int64, int64, int64, int64, int64, int64, int64,
+                                int64, int64, int64, int64, int64, int64), cache=True)
+def cp_spin_spin_moshinsky_basis_matrix_element(cp_red_matrix, small_n_prime, small_l_prime, big_N_prime, big_L_prime, lamb_prime, twoS_prime,
+                                                     small_n, small_l, big_N, big_L, lamb, twoS, twoJ):
+    
+    # Deltas (what happens to the delta_M,M' term? How does it enter?)
+    if small_l_prime != small_l or big_N_prime != big_N or big_L_prime != big_L:
+        return 0.
+    if lamb_prime != lamb or twoS_prime != twoS:
+        return 0.
+    
+    # J, lambda and S independent
+    S = twoS // 2
+    mat_el =  2 * (S * (S + 1) - 3/2) * cp_red_matrix[small_n_prime, small_l, small_n, small_l]
+    
+    return mat_el 
+
+
+# DictType(UniTuple(int64, 9), float64),
+@njit(float64(float64[:,:,:,:, :,:,:,:, :,:,:,:], float64[:,:,:,:, :,:,:,:], DictType(UniTuple(int64, 9), float64),
+                                int64, int64, int64, int64, int64, int64,
+                                int64, int64, int64, int64, int64, int64, int64), cache=True, fastmath=True, parallel=True)
+def central_potential_J_coupling_matrix_element(cp_moshinsky_matrix, moshinsky_brackets, wigner_9j_dict, 
+                                                n1, l1, twoj1, n2, l2, twoj2,
+                                                n3, l3, twoj3, n4, l4, twoj4, twoJ):
+    
     twos1, twos2, twos3, twos4 = 1, 1, 1, 1
 
-    # We have included the spin and parity selectors in case we are dealing with a projector in the potential
-    # "The overall parity of a many-particle system is the product of the parities of the one-particle states."
-    # if parity_projector == "odd": # Select the odd parity states
-    #     if (l3 + l4) % 2 == 0:
-    #         return 0.
-    # elif parity_projector == "even": # Select the even parity states
-    #     if (l3 + l4) % 2 == 1:
-    #         return 0.
-
-    # TODO: Can you also have 2J, 2J'? -> No, because you only use elements with the same J to compute the final matrix elements
-    # Note: in the matrix elements you are asking for, l1=l3, l2=l4, and therefore lambda' is redundant... OR IS IT??
-    # Probably, as for central potential matrix elements you only have non-zero if lambda = lambda'
-    # In any case, for now...
     if (l1 != l3 or l2 != l4) and (l1 != l4 or l2 != l3):
         return 0.
-
-    mat_el = 0
-    for lamb in range(np.abs(l3 - l4), l3 + l4 + 1, 1): #for lamb_prime in prange(np.abs(l3 - l4), l3 + l4 + 1, 1):
-        for twoS in range(0, 3, 2):
-            for twoS_prime in range(0, 3, 2):
-                
-                # Triangle relation
-                if twoJ//2 < np.abs(twoS//2 - lamb) or twoJ//2 > twoS//2 + lamb:
-                    continue
-                if twoJ//2 < np.abs(twoS_prime//2 - lamb) or twoJ//2 > twoS_prime//2 + lamb:
-                    continue
-
-                # We have included the spin and parity selectors in case we are dealing with a projector in the potential
-                if spin_projector == "triplet": # Select the triplet states
-                    if twoS_prime == 0:
-                        continue
-                elif spin_projector == "singlet": # Select the singlet states
-                    if twoS_prime == 2:
-                        continue
-                
-                if parity_projector == "odd": # Select the odd parity states
-                    if (l3+l4) % 2 == 0:
-                        continue
-                elif parity_projector == "even": # Select the even parity states
-                    if twoS_prime//2 % 2 == 1:
-                        continue
-
-                # if parity_projector == "odd":
-                #     ls_el = 0.5 * (cp_ls_matrix[n1, l1, n2, l2, n3, l3, n4, l4, lamb] - (-1)**(lamb + l3 + l4) * cp_ls_matrix[n1, l1, n2, l2, n4, l4, n3, l3, lamb])
-                # elif parity_projector == "even":
-                #     ls_el = 0.5 * (cp_ls_matrix[n1, l1, n2, l2, n3, l3, n4, l4, lamb] + (-1)**(lamb + l3 + l4) * cp_ls_matrix[n1, l1, n2, l2, n3, l3, n4, l4, lamb]) 
-
-                
-                ls_el = cp_ls_matrix[n1, l1, n2, l2, n3, l3, n4, l4, lamb]
-                    
-                wigner_one = float(wigner_9j_dict[(2*l1, twos1, twoj1, 2*l2, twos2, twoj2, 2*lamb, twoS, twoJ)])
-                wigner_two = float(wigner_9j_dict[(2*l3, twos3, twoj3, 2*l4, twos4, twoj4, 2*lamb, twoS_prime, twoJ)])
-
-
-                # if wigner_one == 0 or wigner_two == 0:
-                #     continue
-
-                sqrt_one = np.sqrt((twoj1 + 1) * (twoj2 + 1) * (2*lamb + 1) * (twoS + 1))
-                sqrt_two = np.sqrt((twoj3 + 1) * (twoj4 + 1) * (2*lamb + 1) * (twoS_prime + 1))
-
-
-                mat_el += ls_el * wigner_one * wigner_two * sqrt_one * sqrt_two
-
-                print("lamb, twoS, twoS_prime", lamb, twoS, twoS_prime)
-                print("ls_el", "w1", "w2", ls_el, wigner_one, wigner_two)
-                print("sqrt_one", "sqrt_two", sqrt_one, sqrt_two)
-                print("+ mat_el:", ls_el * wigner_one * wigner_two * sqrt_one * sqrt_two)
-                print("~~~~~~~~~~~~~~")
+    if (twoj1 != twoj3 or twoj2 != twoj4) and (twoj1 != twoj4 or twoj2 != twoj3):
+        return 0.
     
+    # Energy "number"
+    Nq = 2 * n1 + l1 + 2 * n2 + l2 # We only need one of the "two"
+
+    # Global multiplier
+    glob_mult = np.sqrt(twoj1 + 1) * np.sqrt(twoj2 + 1) * np.sqrt(twoj3 + 1) * np.sqrt(twoj4 + 1)
+    # For central potentials (with or without spin-spin interaction) we have deltas in l, N, L, lamb, S.
+    # We use this to simplify the loop.
+    mat_el = 0.
+    for n in prange(Nq//2 + 1):
+        for l in prange(Nq - 2*n + 1):
+            for N in prange((Nq - 2*n - l)//2 + 1):
+                for L in prange(Nq - 2*n - l - 2*N + 1):
+                    for lamb in prange(abs(l - L), abs(L + l)):
+
+                        lamb_mult = 2 * lamb + 1
+
+                        moshinsky_term = moshinsky_brackets[n1, l1, n2, l2, n, l, L, lamb] \
+                                            * moshinsky_brackets[n3, l3, n4, l4, n, l, L, lamb]
+                        
+                        if moshinsky_term == 0:
+                            continue
+                        
+                        for twoS in range(0, 3, 2):
+                            S_mult = twoS + 1
+
+                            wigner_one = wigner_9j_dict[(2*l1, twos1, twoj1, 2*l2, twos2, twoj2, 2*lamb, twoS, twoJ)]
+                            wigner_two = wigner_9j_dict[(2*l3, twos3, twoj3, 2*l4, twos4, twoj4, 2*lamb, twoS, twoJ)]
+                            wigner_9j_term = wigner_one * wigner_two
+
+                            moshinsky_basis_el = cp_moshinsky_matrix[n, l, N, L, lamb, twoS, n, l, N, L, lamb, twoS]
+
+                            mat_el += lamb_mult * S_mult * wigner_9j_term * moshinsky_term * moshinsky_basis_el
+    
+    mat_el *= glob_mult
+
     return mat_el
+
+
 
 
 # ----------------------------------------------------------------------------------------------
@@ -243,13 +176,20 @@ def set_moshinsky_brackets(Ne_max, l_max):
 
 
 # load the Wigner 9j dictionary
-def set_wigner_9js():
+def set_wigner_9js(numba=False):
     # Load the pickle file
     with open('{}/wigner_9js.pcl'.format(SAVES_DIR), 'rb') as handle:
         wigner_9j_dict = pickle.load(handle)
     
-    return wigner_9j_dict
+    if numba:
+        wigner_9js_numba = Dict.empty(Tuple((int64, int64, int64, int64, int64, int64, int64, int64, int64)), float64)
+        for key, value in wigner_9j_dict.items():
+            wigner_9js_numba[key] = value
+        
+        print(type(wigner_9js_numba))
+        return wigner_9js_numba
 
+    return wigner_9j_dict
 
 
 # This is Minnesota specific
@@ -274,41 +214,53 @@ def set_central_potential_reduced_matrix(wavefunctions, V0, mu, Ne_max, l_max, i
     return central_potential_reduced_matrix
 
 
-# TODO: check you are covering all the indices...
-@njit(float64[:,:,:,:,:,:,:,:,:](float64[:,:,:,:], float64[:,:,:,:,:,:,:,:], int64, int64, unicode_type), parallel=True, fastmath=True, cache=True)
-def set_central_potential_ls_coupling_basis_matrix(cp_red_matrix, moshinsky_brackets, Ne_max, l_max, parity_projector):
-    ni_max = Ne_max // 2
-    lambda_max = 2*l_max
+# Both for the CP and CP*spin-spin matrices
+#@njit(float64[:,:,:, :,:,:, :,:,:, :,:,:](float64[:,:,:,:], int64, int64, boolean)) -> This makes it crash... why?
+def set_central_potential_moshinsky_basis_matrix(cp_red_matrix, Ne_max, l_max, spin_spin):
+    ni_max = Ne_max
+    li_max = 2 * Ne_max 
+    lambda_max = 2*li_max
 
-    central_potential_ls_coupling_basis_matrix = np.zeros((ni_max+1, l_max+1, ni_max+1,
-                                                         l_max+1, ni_max+1, l_max+1, ni_max+1, l_max+1, lambda_max+1))
+    # n l N L lamb S (independent of J, M_J)
+    central_potential_moshinsky_basis_matrix = np.zeros((ni_max+1, li_max+1, ni_max+1, li_max+1, lambda_max +1, 3, 
+                                                         ni_max+1, li_max+1, ni_max+1, li_max+1, lambda_max +1, 3))
+    
+    # We can exploit the symmetry of the matrix elements to reduce the number of calculations (i.e., the deltas)
+    # Deltas in l, N, L, lamb, S in both pure CP and CP*spin-spin
     # Set the central potential (in ls coupling basis) matrix
-    for n1 in prange(ni_max + 1):
-        l1_0 = min(l_max, Ne_max - 2*n1)
-        for l1 in prange(0, l1_0 + 1):
-            for n2 in prange(ni_max + 1):
-                l2_0 = min(l_max, Ne_max - 2*n2)
-                for l2 in prange(0, l2_0 + 1):
-                    for n3 in prange(ni_max + 1):
-                        l3_0 = min(l_max, Ne_max - 2*n3)
-                        for l3 in prange(0, l3_0 + 1):
-                            for n4 in prange(ni_max + 1):
-                                l4_0 = min(l_max, Ne_max - 2*n4)
-                                for l4 in prange(l4_0 + 1):
-                                    for lamb in prange(lambda_max + 1):
+    for n in prange(ni_max + 1):
+        for l in prange(li_max + 1):
+            for N in prange(ni_max + 1):
+                for L in prange(li_max + 1):
+                    for lamb in prange(abs(l - L), abs(L + l)):
+                        for S in prange(2):
+                        # TODO: n_prime will constrained by n and Ne_max in this case (not here, but later)
+                            for n_prime in prange(ni_max + 1):
+                                
+                                if spin_spin:
+                                    mat_el = cp_spin_spin_moshinsky_basis_matrix_element(cp_red_matrix, 
+                                                    n_prime, l, N, L, lamb, 2*S,
+                                                    n, l, N, L, lamb, 2*S, twoJ=0) # independent of J
+                                else:
+                                    mat_el = central_potential_moshinsky_basis_matrix_element(cp_red_matrix, 
+                                                    n_prime, l, N, L, lamb, 2*S,
+                                                    n, l, N, L, lamb, 2*S, twoJ=0)
 
-                                        central_potential_ls_coupling_basis_matrix[n1, l1, n2, l2, n3, l3, n4, l4, lamb] =\
-                                            central_potential_ls_coupling_basis_matrix_element(cp_red_matrix, moshinsky_brackets,
-                                            n1, l1, n2, l2, n3, l3, n4, l4, lamb, parity_projector)
+                                central_potential_moshinsky_basis_matrix[n_prime, l, N, L, lamb, 2*S, n, l, N, L, lamb, 2*S] =\
+                                    mat_el
 
-    return central_potential_ls_coupling_basis_matrix
+    return central_potential_moshinsky_basis_matrix
 
 
-#@njit(float64[:,:,:,:,:,:,:,:,:,:,:,:,:](float64[:,:,:,:,:,:,:,:,:], int64, int64), parallel=True, fastmath=True)
-def set_central_potential_J_coupling_basis_matrix(cp_ls_coupling_matrix, wigner_9j_dict, Ne_max, l_max, spin_projector, parity_projector):
+@njit(float64[:,:,:, :,:,:, :,:,:, :,:,:, :](float64[:,:,:,:, :,:,:,:, :,:,:,:], float64[:,:,:,:, :,:,:,:], DictType(UniTuple(int64, 9), float64), int64, int64),
+        cache=True)
+def set_central_potential_J_coupling_basis_matrix(cp_moshinsky_matrix, moshinsky_brackets, wigner_9j_dict, Ne_max, l_max):
     ni_max = Ne_max // 2
     twoj_max = 2*l_max + 1
     twoJ_max = 2 * twoj_max
+
+    # TODO: Does this matrix need to be diagonal in l, l', j, j' for a general choice of potential?
+    # Even for spin-spin?
 
     central_potential_J_coupling_basis_matrix = np.zeros((ni_max+1, l_max+1, 2, ni_max+1, l_max+1, 2, ni_max+1, l_max+1, 2, ni_max+1, l_max+1, 2, twoJ_max + 1))
 
@@ -325,16 +277,17 @@ def set_central_potential_J_coupling_basis_matrix(cp_ls_coupling_matrix, wigner_
                             for n3 in prange(0, (Ne_max - l) // 2 + 1):
                                 for n4 in prange(0, (Ne_max - l_prime) // 2 + 1):
                                     for twoJ in range(np.abs(twoj - twoj_prime), twoj + twoj_prime + 1, 2):
-                                         
                                         central_potential_J_coupling_basis_matrix[n1, l, twoj_idx, n2, l_prime, twoj_prime_idx,\
                                                                                  n3, l, twoj_idx, n4, l_prime, twoj_prime_idx, twoJ] =\
-                                            central_potential_J_coupling_matrix_element(cp_ls_coupling_matrix, wigner_9j_dict, n1, l, twoj, n2, l_prime,
-                                                    twoj_prime, n3, l, twoj, n4, l_prime, twoj_prime, twoJ, spin_projector, parity_projector)
+                                            central_potential_J_coupling_matrix_element(cp_moshinsky_matrix, moshinsky_brackets,
+                                                                                        wigner_9j_dict, n1, l, twoj, n2, l_prime,
+                                                                            twoj_prime, n3, l, twoj, n4, l_prime, twoj_prime, twoJ)
 
                                         central_potential_J_coupling_basis_matrix[n1, l, twoj_idx, n2, l_prime, twoj_prime_idx, \
                                                                                  n4, l_prime, twoj_prime_idx, n3, l, twoj_idx, twoJ] =\
-                                            central_potential_J_coupling_matrix_element(cp_ls_coupling_matrix, wigner_9j_dict, n1, l, twoj, n2, l_prime,
-                                                    twoj_prime, n4, l_prime, twoj_prime, n3, l, twoj, twoJ, spin_projector, parity_projector)
+                                            central_potential_J_coupling_matrix_element(cp_moshinsky_matrix, moshinsky_brackets,
+                                                                                        wigner_9j_dict, n1, l, twoj, n2, l_prime,
+                                                                            twoj_prime, n4, l_prime, twoj_prime, n3, l, twoj, twoJ)
     
     return central_potential_J_coupling_basis_matrix
 
