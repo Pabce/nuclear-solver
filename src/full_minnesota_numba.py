@@ -49,7 +49,7 @@ def n_matrix_4dflatten(matrix, include_m, m_diagonal, asym, num_states, Ne_max, 
     dim = 4
     flat_matrix = np.zeros((num_states, num_states, num_states, num_states))
 
-    idx = np.zeros(dim, dtype=int64)
+    idx = np.zeros(dim, dtype=np.int64)
 
     for n1 in prange(Ne_max//2 + 1):
         for l1 in prange(l_level_max + 1):

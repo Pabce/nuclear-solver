@@ -9,6 +9,7 @@ from scipy.integrate import quad, dblquad
 import harmonic_3d as h3d
 import time
 import moshinsky_way as mw
+import moshinsky_way_2 as mw2
 import hf_numba_helpers 
 
 from copy import deepcopy
@@ -128,6 +129,7 @@ class System:
                     t[n1, l, twoj_idx, n2, l, twoj_idx] = val
 
         t *= 0.5 * self.hbar_omega
+        t *= 2
 
         return t
     
@@ -364,12 +366,255 @@ class System:
         return V_mat, V_non_asym, cp_J_coupling_basis_mats
 
 
+    def get_two_body_matrix_elements_3(self):
+        Ne_max, l_max, hbar_omega, mass = self.Ne_max, self.l_level_max, self.hbar_omega, self.mass
+        integration_limit, integration_steps = 40, 55000
+
+        # TODO: Add a way to pass the potential into the Moshinsky class
+        # Set the radial wavefunctions
+        wfs = mw2.set_wavefunctions(Ne_max, l_max, hbar_omega, mass, integration_limit, integration_steps)
+
+        # Set the Moshinsky brackets, reading from file
+        start = time.time()
+        moshinsky_brackets = mw2.set_moshinsky_brackets(Ne_max, l_max)
+        print("Time to set Moshinsky brackets:", time.time() - start)
+
+        # Set the Wigner 9j symbols, reading from file
+        start = time.time()
+        wigner_9j_dict = mw2.set_wigner_9js(numba=True)
+        print("Time to set Wigner 9j symbols:", time.time() - start)
+
+        print('---------------------------------------------------------------')
+
+        cp_mats = []
+        cp_J_coupling_basis_mats = []
+        V_mats = []
+
+        
+        for i, params in enumerate([(self.V0R, self.kappaR, False), (self.V0R, self.kappaR, True), 
+                       (-self.V0s, self.kappas, False), (-self.V0s, self.kappas, True),
+                       (-self.V0t, self.kappat, False), (-self.V0t, self.kappat, True)]):
+            if i >= 4:
+                break
+
+            V0, kappa, spin_spin = params
+
+            start = time.time()
+            central_potential_reduced_matrix = mw2.set_central_potential_reduced_matrix(wfs, V0, kappa,
+                                                        Ne_max, l_max, integration_limit, integration_steps)
+            print("RED SYM", np.allclose(central_potential_reduced_matrix, central_potential_reduced_matrix.transpose((2,3,0,1))))
+            print("Time to set reduced matrix elements:", time.time() - start)
+
+            # Set the central potential matrix in ls coupling basis
+            start = time.time()
+            cp_moshinsky_matrix = mw2.set_central_potential_moshinsky_basis_matrix(central_potential_reduced_matrix, Ne_max, 
+                                                                                   l_max, spin_spin=spin_spin)
+            print("MOS SYM", np.allclose(cp_moshinsky_matrix, cp_moshinsky_matrix.transpose((6,1,2,3,4,5,0))))
+            print("Time to set Moshinsky basis matrix:", time.time() - start, params)
+            
+            # Set the central potential matrix in J coupling basis
+            start = time.time()
+            central_potential_J_coupling_matrix = mw2.set_central_potential_J_coupling_basis_matrix(
+                                                cp_moshinsky_matrix, moshinsky_brackets, wigner_9j_dict,
+                                                Ne_max, l_max)
+            
+            print("Time to set J coupling basis matrix:", time.time() - start)
+            print("J SYM", np.allclose(central_potential_J_coupling_matrix, central_potential_J_coupling_matrix.transpose((6,7,8, 9,10,11, 0,1,2, 3,4,5, 12))))
+            print("J ALL ZERO", np.allclose(central_potential_J_coupling_matrix, 0))
+            cp_J_coupling_basis_mats.append(central_potential_J_coupling_matrix)
+            #print(np.allclose(central_potential_J_coupling_matrix, 0))
+            
+            # Get the central potential matrix, once and for all
+            start = time.time()
+            central_potential_matrix = mw2.set_central_potential_matrix(central_potential_J_coupling_matrix, Ne_max, l_max)
+            print("TOTAL ALL 0", np.allclose(central_potential_matrix, 0))
+            print("Time to set central potential matrix:", time.time() - start)
+
+            cp_mats.append(central_potential_matrix)
+
+            print("------------------------------------------------------------------------------")
+        
+        # cp_mats have components (n1, l1, twoj1, n2, l2, twoj2, n3, l3, twoj3, n4, l4, twoj4)
+        vr, vr_spin_spin, vs, vs_spin_spin = cp_mats[0:4]
+        
+        # This is exactly equivalent to what you were doing. You're fucking stupid.
+        # vt, vt_spin_spin = cp_mats[4:6]
+        # v0 = 3/16 * (2*vr + vs + vt) + 1/16 * (-2*vr + vs - 3*vt) # v0 + v_tau. Second term is tau contribution (could be wrong)
+        # v_sigma = 1/16 * (-2*vr_spin_spin - 3*vs_spin_spin + vt_spin_spin) + 1/16*(-2*vr_spin_spin - vs_spin_spin - vt_spin_spin) # v_sigma + v_sigtau. Second term is sigtau contribution (could be wrong)
+        # v = v0 + v_sigma
+
+        # vs_spin_spin_J = cp_J_coupling_basis_mats[3]
+        # # print(vs_spin_spin_J[3,2,1, 3,2,1, 3,2,1, 3,2,1, :])
+        # # print(vs_spin_spin[3,2,1, 3,2,1, 3,2,1, 3,2,1])
+
+        # print(vs_spin_spin_J[2,0,1, 1,0,1, 0,0,1, 1,0,1, :])
+        # print(vs_spin_spin[2,0,1, 1,0,1, 0,0,1, 1,0,1])
+
+        # print(vs_spin_spin_J[2,1,1, 1,0,1, 0,1,1, 1,0,1, :])
+        # print(vs_spin_spin[2,1,1, 1,0,1, 0,1,1, 1,0,1])
+
+        # vss = vs_spin_spin_J[2,2,1, 2,2,1, 2,2,1, 2,2,1, :]
+        # print(vss)
+        # print(vs_spin_spin[2,2,1, 2,2,1, 2,2,1, 2,2,1])
+        # vss_w = np.array([(2*i+1)*vss[i] for i in range(len(vss))])
+        # print(vss_w)
+        # print(vss_w/vss[0])
+
+
+        v = 1/4 * (vr + vs - vr_spin_spin - vs_spin_spin) # TODO: why is this independent of the spin-spin term for l=0?
+        v2 = 1/4 * (vr + vs)# - vr_spin_spin - vs_spin_spin)
+        #v=v2
+
+        # print(np.allclose(v, v2))
+        # print(np.allclose(vs_spin_spin - vs_spin_spin.transpose((0,1,2, 3,4,5, 9,10,11, 6,7,8)), 0))
+
+        V_mat = v - v.transpose((0,1,2, 3,4,5, 9,10,11, 6,7,8))
+        V_mat_2 = v2 - v2.transpose((0,1,2, 3,4,5, 9,10,11, 6,7,8))
+
+        print("DOES SPIN CONTRIBUTION DIE?:", np.allclose(V_mat, V_mat_2))
+
+        #V_mat = V_mat_2
+
+        #V_mat = (V_mat + V_mat.transpose((6,7,8, 9,10,11, 0,1,2, 3,4,5)) )
+        V_non_asym = v
+        #exit()
+
+        # print(self.num_states)
+        # print(V_mat.shape)
+
+        # Some checks
+        print("All zeros?", np.allclose(V_mat, 0))
+        print("Already asym?", np.allclose(v, V_mat))
+        print("Fraction of non-zero elements?", np.count_nonzero(V_mat)/V_mat.size)
+
+        asym = np.allclose(V_mat, -V_mat.transpose((0,1,2, 3,4,5, 9,10,11, 6,7,8)))
+        print("Asym potential -- All antisym:", asym)
+        print("Asym J coupling basis -- All antisym:", np.allclose(cp_J_coupling_basis_mats[0], -cp_J_coupling_basis_mats[0].transpose((0,1,2, 3,4,5, 9,10,11, 6,7,8, 12))))
+        #print("Asym potential -- All antisym 2", np.allclose(v_a, -v_a.transpose((3,4,5, 0,1,2, 6,7,8, 9,10,11))))
+
+        # Some checks on V_mat
+        # Is it sym?
+        print("Not antisymmetrized potetial -- All sym?", np.allclose(v, v.transpose((6,7,8, 9,10,11, 0,1,2, 3,4,5))))
+        print("Asym potetial -- All sym?", np.allclose(V_mat, V_mat.transpose((6,7,8, 9,10,11, 0,1,2, 3,4,5))))
+
+
+        cpj = cp_J_coupling_basis_mats[2]
+
+        for n1, n2, n3, n4 in product(range(Ne_max//2 + 1), repeat=4):
+            for l1, l2, l3, l4 in product(range(l_max + 1), repeat=4):
+                for twoj1_idx, twoj2_idx, twoj3_idx, twoj4_idx in product(range(2), repeat=4):
+            
+                    twoj1 = 2 * l1 - 1 + 2 * twoj1_idx
+                    twoj2 = 2 * l2 - 1 + 2 * twoj2_idx
+                    twoj3 = 2 * l3 - 1 + 2 * twoj3_idx
+                    twoj4 = 2 * l4 - 1 + 2 * twoj4_idx
+
+                    if twoj1 < 0 or twoj2 < 0 or twoj3 < 0 or twoj4 < 0:
+                        continue
+
+                    if (l1 != l2 or l3 != l4) and (l1 != l4 or l2 != l3):
+                        continue
+                    if (twoj1 != twoj2 or twoj3 != twoj4) and (twoj1 != twoj4 or twoj2 != twoj3):
+                        continue
+
+                    # for twoJ in range(np.abs(twoj1 - twoj2), twoj1 + twoj2 +1, 2):
+                    #     cp1 = cpj[n1,l1,twoj1_idx, n2,l2,twoj2_idx, n3,l3,twoj3_idx, n4,l4,twoj4_idx, twoJ]
+                    #     cp2 = cpj[n1,l1,twoj1_idx, n2,l2,twoj2_idx, n4,l4,twoj4_idx, n3,l3,twoj3_idx, twoJ]
+
+                    #     if not np.allclose(np.abs(cp1), np.abs(cp2)) and (cp1 == 0 or cp2 == 0):
+                    #         print(n1,l1,twoj1_idx, n2,l2,twoj2_idx, n3,l3,twoj3_idx, n4,l4,twoj4_idx, twoJ)
+                    #         print(cp1)
+                    #         print(cp2)
+                    
+                    # if not np.allclose(V_mat[n1,l1,twoj1_idx, n2,l2,twoj2_idx, n3,l3,twoj3_idx, n4,l4,twoj4_idx], 
+                    #                    V_mat[n3,l3,twoj3_idx, n4,l4,twoj4_idx, n1,l1,twoj1_idx, n2,l2,twoj2_idx]):
+                    #     print(n1, n2, n3, n4, l1, l2, l3, l4, twoj1, twoj2, twoj3, twoj4)
+                    #     print(V_mat[n1,l1,twoj1_idx, n2,l2,twoj2_idx, n3,l3,twoj3_idx, n4,l4,twoj4_idx])
+                    #     print(V_mat[n3,l3,twoj3_idx, n4,l4,twoj4_idx, n1,l1,twoj1_idx, n2,l2,twoj2_idx])
+
+                    # if l1 == l3 and twoj1 == twoj3:
+                    #     print(V_mat[n1,l1,twoj1_idx, n2,l2,twoj2_idx, n3,l3,twoj3_idx, n4,l4,twoj4_idx])
+
+                    # if abs(vr_spin_spin[n1,l1,twoj1_idx, n2,l2,twoj2_idx, n3,l3,twoj3_idx, n4,l4,twoj4_idx]) > 1e-1:
+                    #     print(n1,l1,twoj1_idx, n2,l2,twoj2_idx, n3,l3,twoj3_idx, n4,l4,twoj4_idx)
+                    #     ssJ = vs_spin_spin_J[n1,l1,twoj1_idx, n2,l2,twoj2_idx, n3,l3,twoj3_idx, n4,l4,twoj4_idx, :]
+                    #     print(ssJ)
+
+                    #     print(vr_spin_spin[n1,l1,twoj1_idx, n2,l2,twoj2_idx, n3,l3,twoj3_idx, n4,l4,twoj4_idx])
+                    #     print([(2*i+1) * ssJ[i] for i in range(len(ssJ))])
+
+                        
+                    #     print("---------------")
+
+        #exit()
+            
+        print("------------------ªªªªª------------------")
+
+        # print(V_mat[0,0,1,1,0,1,:,0,1,:,0,1])
+        # print(self.index_flattener(0,0,1,-1))
+        # print(self.index_flattener(1,0,1,-1))
+        
+
+        return V_mat, V_non_asym, cp_J_coupling_basis_mats
+
+
+    def get_two_body_matrix_elements_4(self):
+        quantum_numbers = np.loadtxt("../saved_values/nucleispnumbers.dat", usecols=(1,2,3,4,5), dtype=int)
+        print(quantum_numbers.shape)
+
+        # Read the nucleitwobody.dat with numpy
+        flat_indices = np.loadtxt("../saved_values/nucleitwobody.dat", usecols=(0,1,2,3), dtype=int)
+        values = np.loadtxt("../saved_values/nucleitwobody.dat", usecols=(4,), dtype=float)
+        num_entries = len(values)
+        print(num_entries)
+
+        m_values = {}
+        # Index the values with the quantum numbers
+        for i in range(num_entries):
+            n1, l1, twoj1, twom1, _ = quantum_numbers[flat_indices[i, 0]-1, :]
+            n2, l2, twoj2, twom2, _ = quantum_numbers[flat_indices[i, 1]-1, :]
+            n3, l3, twoj3, twom3, _ = quantum_numbers[flat_indices[i, 2]-1, :]
+            n4, l4, twoj4, twom4, _ = quantum_numbers[flat_indices[i, 3]-1, :]
+
+            
+            m_values[(n1, l1, twoj1, twom1, n2, l2, twoj2, twom2, n3, l3, twoj3, twom3, n4, l4, twoj4, twom4)] = values[i]
+
+        cp_coupled_values = np.zeros((2,4,2, 2,4,2, 2,4,2, 2,4,2))
+        for i in range(num_entries):
+            n1, l1, twoj1, twom1, _ = quantum_numbers[flat_indices[i, 0]-1, :]
+            n2, l2, twoj2, twom2, _ = quantum_numbers[flat_indices[i, 1]-1, :]
+            n3, l3, twoj3, twom3, _ = quantum_numbers[flat_indices[i, 2]-1, :]
+            n4, l4, twoj4, twom4, _ = quantum_numbers[flat_indices[i, 3]-1, :]
+
+            val = m_values[(n1, l1, twoj1, twom1, n2, l2, twoj2, twom2, n3, l3, twoj3, twom3, n4, l4, twoj4, twom4)] 
+
+            # if (twoj1 != twoj2 or twoj3 != twoj4) and (twoj1 != twoj3 or twoj2 != twoj4) and val != 0:
+            #     print("HMMM", val)
+            #     continue
+                
+            twoj1_idx = 0 if twoj1 < 2*l1 else 1
+            twoj2_idx = 0 if twoj2 < 2*l2 else 1
+            twoj3_idx = 0 if twoj3 < 2*l3 else 1
+            twoj4_idx = 0 if twoj4 < 2*l4 else 1
+
+            cp_coupled_values[n1, l1, twoj1_idx, n2, l2, twoj2_idx, n3, l3, twoj3_idx, n4, l4, twoj4_idx] += \
+                                        1/(twoj1+1)/(twoj2+1) * val
+            cp_coupled_values[n3, l3, twoj3_idx, n4, l4, twoj4_idx, n1, l1, twoj1_idx, n2, l2, twoj2_idx] += \
+                                        1/(twoj1+1)/(twoj2+1) * val
+            
+        cp_coupled_values = 1/32 * (cp_coupled_values + cp_coupled_values.transpose(6,7,8, 9,10,11, 0,1,2, 3,4,5))
+
+        cp_coupled_values_asym = cp_coupled_values - cp_coupled_values.transpose(0,1,2, 3,4,5, 9,10,11, 6,7,8)
+        
+        return cp_coupled_values_asym, cp_coupled_values, cp_coupled_values
+
+
     # Energies of the HO basis eigenstates
     def get_ho_energies(self, Ne=-1, n=-1, l=-1):
         if Ne == -1:
-            return 0.5 * self.hbar_omega * (2 * n + l + 3/2)
+            return self.hbar_omega * (2 * n + l + 3/2)
         else:
-            return 0.5 * self.hbar_omega * Ne
+            return self.hbar_omega * (Ne + 3/2)
 
     # Get the indices of the lowest energy states
     def get_lowest_energies(self, include_m):
@@ -511,7 +756,7 @@ class System:
 
 
 if __name__ == '__main__':
-    system = System(Ne_max=4, l_max=0, hbar_omega=240, mass=939)
+    system = System(Ne_max=2, l_max=0, hbar_omega=240, mass=939)
 
     # idx = system.index_flattener(0, 0, 1, 1)
     # print(idx)

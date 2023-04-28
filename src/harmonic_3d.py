@@ -40,15 +40,26 @@ def wavefunction(r, k=-1, n=-1, l=0, hbar_omega=1, mass=1):
     if k < 0:
         k = int((n - l)/2)
 
-    a_kl = np.sqrt(2**(k + l + 2) * np.math.factorial(k) / (factorial2(2*k + 2*l + 1) * np.pi**0.5))
+    # a_kl = np.sqrt(2**(k + l + 2) * np.math.factorial(k) / (factorial2(2*k + 2*l + 1) * np.pi**0.5))
 
-    # b = np.sqrt(hbar/(mass * omega)) # This is in fm -> hbar/omega = HBAR**2 / hbar_omega
-    b = np.sqrt(HBAR**2/(hbar_omega * mass))
-    squiggle = r / b
+    # # b = np.sqrt(hbar/(mass * omega)) # This is in fm -> hbar/omega = HBAR**2 / hbar_omega
+    # b = np.sqrt(HBAR**2/(hbar_omega * mass))
+    # squiggle = r / b
+    # laguerre = genlaguerre(n=k, alpha=l+0.5)
+
+    # r_kl = a_kl * b**(-1.5) * np.exp(-squiggle**2 / 2) * squiggle**l * laguerre(squiggle**2)
+
+    # norm = np.sum(np.abs(r_kl)**2 * r**2) * (r[1] - r[0])
+    # print(norm)
+
+    # ------------------- The above and below are equivalent -------------------
+
+    nu = mass * hbar_omega / (2 * HBAR**2)
+    a_kl = np.sqrt(np.sqrt(2*nu**3/np.pi)  * ( 2**(k + 2*l + 3) * np.math.factorial(k) * nu**l )/factorial2(2*k + 2*l + 1) )
     laguerre = genlaguerre(n=k, alpha=l+0.5)
 
-    r_kl = a_kl * b**(-1.5) * np.exp(-squiggle**2 / 2) * squiggle**l * laguerre(squiggle**2)
-
+    r_kl = a_kl * r**l * np.exp(-nu * r**2) * laguerre(2*nu * r**2)
+    
     # norm = np.sum(np.abs(r_kl)**2 * r**2) * (r[1] - r[0])
     # print(norm)
 

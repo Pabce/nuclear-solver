@@ -119,5 +119,8 @@ def test_run_matrices(system, rho=None, D=None, hamiltonian=None, gamma=None, in
             cprint("Hamiltonian diagonal in l, j, m: {}".format(hamiltonian_diag_ljm), "green" if hamiltonian_diag_ljm else "red")
 
 
+    # Check that D respects l, j symmetry rowwise
+
+
 def test_matrix_elements(V_matrizx=None, t_matrix=None):
     pass

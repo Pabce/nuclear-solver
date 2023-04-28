@@ -32,7 +32,7 @@ program compute_brackets
 
     ! The angular parameters are CO=COS(VARPHI) and SI=SIN(VARPHI). Set, for example (for equal masses)
     SI = 1/sqrt(2.d0)
-    CO = -SI
+    CO = SI
 
     ! Allocate the array
     allocate (BRAC(0:LMAX, 0:(NQMAX-LMIN)/2, 0:(NQMAX-LMIN)/2, 0:(NQMAX-LMIN)/2,&
@@ -88,18 +88,20 @@ program compute_brackets
                                     !print *, i
                                     ! Write all the indices and the BRAC value to the file
                                     ! Write only if the value is not zero (or close to zero)
-                                    if (np == 0 .and. n1p == 0 .and. mp == 0 .and. n1 == 0 .and. &
-                                        n2 == 0 .and. n == 0 .and. m == 1 .and. l == 1) then
+                                    ! if (np == 0 .and. n1p == 0 .and. mp == 0 .and. n1 == 0 .and. &
+                                    !     n2 == 0 .and. n == 0 .and. m == 1 .and. l == 1) then
+                                    !     print *, np, n1p, mp, n1, n2, n, m, l
+                                    !     print *, BRAC(np, n1p, mp, n1, n2, n, m, l)
+                                    !     print *, BRAC(n, n1, m, n1p, n2p, np, mp, l)
+                                    ! end if
+                                     
+                                    if (l1p == 1 .and. l2p == 1 .and. l1 == 0 .and. l2 == 0 .and. &
+                                        n1p == 0 .and. n2p == 1 .and. n1 == 1 .and. n2 == 1 .and. &
+                                        L == 0) then
                                         print *, np, n1p, mp, n1, n2, n, m, l
                                         print *, BRAC(np, n1p, mp, n1, n2, n, m, l)
                                         print *, BRAC(n, n1, m, n1p, n2p, np, mp, l)
                                     end if
-                                     
-                                    ! As this program is retarded, I'm gonna follow Moshinsky's advice and only
-                                    ! compute the neccessary brackets by symmetry. Maybe that fixes it...
-                                    ! if ((l1 > l2) .or. (l1p > l2p)) then
-                                    !     cycle
-                                    ! end if
 
                                     if (abs(BRAC(np, n1p, mp, n1, n2, n, m, l)) > 1.d-10) then
                                     ! print *, Np, nnp, n2p
@@ -112,43 +114,6 @@ program compute_brackets
                                         ! To get the original Moshinsky coefficients... ????
                                         write(10, '(8(2I4))', advance="no") np, n1p, mp, n1, n2, n, m, l
                                         write(10, *) BRAC(np, n1p, mp, n1, n2, n, m, l)
-                                        !print *, (-1)**(l1p+l2p+l), (-1)**(l1p+l2p+l)
-
-                                        ! nnp, n2p, mp, n1, n2, n, m, l
-                                        ! Best attemp yet...
-                                        ! write(10, '(8(2I4))', advance="no") nnp, n2p, mp, n1, n2, n, m, l
-                                        ! write(10, *) (-1)**(l + l1) * BRAC(np, n1p, mp, n1, n2, n, m, l)
-                                        !print *, n1p, (2 * n1 + l1 + 2 * n2 + l2 - l1p - 2 * n2p - l2p)/2
-                                        !print *, nnp, np + l2p - l1p
-                                        ! nl1p = MP + nnp + eps
-                                        ! nl2p = MP - nnp + L
-                                        ! print *, nl1p, nl2p, l1p, l2p
-                                        
-                                        ! if (abs(BRAC(nn, n2, m, n2p, n1p, nnp, mp, l) - &
-                                        !         BRAC(np, n1p, mp, n1, n2, n, m, l)) > 1.d-8) then
-                                            
-                                        !     print *, "NOT OK", BRAC(nn, n2, m, n2p, n1p, nnp, mp, l), &
-                                        !                         BRAC(np, n1p, mp, n1, n2, n, m, l)
-                                        ! end if
-                                        
-                                        if (BRAC(np, n1p, mp, n1, n2, n, m, l) - &
-                                            BRAC(n, n1, m, n1p, n2p, np, mp, l) < 1.d-8) then
-                                            
-                                            !print *, "OK"
-                                            !print *, (-1)**(l1p+l2), (-1)**(l1+l2p)
-                                            ! if (Nq /= Nqp) then
-                                            !     print *, "NQ != NQP"
-                                            !     print *, Nq, Nqp
-                                            !     continue
-                                            ! end if
-
-                                            continue
-                                        else
-                                            print *, "NOT OK", BRAC(np, n1p, mp, n1, n2, n, m, l) &
-                                                                - BRAC(n, n1, m, n1p, n2p, np, mp, l)
-
-                                            continue
-                                        end if          
 
 
                                     end if

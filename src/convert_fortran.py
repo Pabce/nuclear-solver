@@ -170,6 +170,14 @@ def get_moshinsky_arrays(saves_dir=None):
     brackets[tuple(indices_even.T)] = values_f_even * multipliers_even
     brackets[tuple(indices_odd.T)] = values_f_odd * multipliers_odd
 
+    # Create dictionary
+    # Create a dictionary from the nonzero values
+    brackets_dict = {}
+    for i in range(len(indices_even)):
+        brackets_dict[tuple(indices_even[i])] = values_f_even[i]
+    for i in range(len(indices_odd)):
+        brackets_dict[tuple(indices_odd[i])] = values_f_odd[i]
+
 
     #brackets[tuple(swapped_indices_even.T)] = values_f_even
     # brackets[tuple(swapped_indices_odd.T)] = values_f_odd
@@ -200,4 +208,4 @@ def get_moshinsky_arrays(saves_dir=None):
     # brackets_Ne[tuple(indices_Ne.T)] = values_f
     brackets_Ne = None
 
-    return brackets, brackets_Ne, indices_even, indices_odd, brackets_f_even, indices_f_even, brackets_f_odd, indices_f_odd
+    return brackets, brackets_Ne, indices_even, indices_odd, brackets_f_even, indices_f_even, brackets_f_odd, indices_f_odd, brackets_dict
